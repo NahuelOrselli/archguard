@@ -1,0 +1,20 @@
+version: 0
+
+services:
+  - id: web
+    path: apps/web
+    type: frontend
+    owner: team-web
+
+  - id: api
+    path: apps/api
+    type: backend
+    owner: team-core
+
+resources:
+  - id: users-db
+    type: postgres
+    owner: team-data
+
+rules:
+  no_frontend_db_access: error
