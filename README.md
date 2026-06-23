@@ -3,6 +3,7 @@
 Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitHub Actions.
 
 See `ROADMAP.md` for planned milestones and priorities.
+See `docs/ROADMAP_GTM.md` for user-facing rollout plan.
 
 ## What this MVP does
 
