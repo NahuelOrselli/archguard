@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const readline = require("node:readline/promises");
 const { execSync } = require("node:child_process");
 const yaml = require("js-yaml");
 
@@ -17,10 +18,10 @@ const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
 const DEFAULT_CONFIG_NAME = ".archguard.yaml";
 const CONFIG_CANDIDATES = [DEFAULT_CONFIG_NAME, ".archguard.yml", ".arch.yaml", ".arch.yml"];
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.command === "init") {
-    runInit(args);
+    await runInit(args);
     return;
   }
 
@@ -111,7 +112,7 @@ function runCheck(args) {
   }
 }
 
-function runInit(args) {
+async function runInit(args) {
   const configPath = resolveInitConfigPath(args.config);
   const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   if (fs.existsSync(configPath) && !args.force) {
@@ -119,15 +120,13 @@ function runInit(args) {
     process.exit(1);
   }
 
-  const discoveredServices = discoverServices();
+  const initOptions = await resolveInitOptions(args);
+  const discoveredServices = discoverServices(initOptions.roots, initOptions.inferenceMode);
   const config = {
     version: 0,
     services: discoveredServices,
     resources: [],
-    rules: {
-      no_frontend_db_access: "error",
-      require_owner: "error"
-    }
+    rules: getRulesPreset(initOptions.preset)
   };
 
   fs.writeFileSync(configPath, yaml.dump(config, { noRefs: true, lineWidth: 120 }), "utf8");
@@ -142,7 +141,10 @@ function parseArgs(argv) {
     base: null,
     head: null,
     out: null,
-    force: false
+    force: false,
+    yes: false,
+    preset: null,
+    root: null
   };
 
   for (let i = 1; i < argv.length; i += 1) {
@@ -163,6 +165,21 @@ function parseArgs(argv) {
       i += 1;
     } else if (token === "--force") {
       args.force = true;
+    } else if (token === "--yes") {
+      args.yes = true;
+    } else if (token === "--preset") {
+      args.preset = argv[i + 1];
+      i += 1;
+    } else if (token === "--root") {
+      args.root = argv[i + 1];
+      i += 1;
+    }
+  }
+
+  if (args.command === "init") {
+    if (args.preset && !["minimal", "recommended", "strict"].includes(args.preset)) {
+      process.stderr.write("Invalid --preset value. Use one of: minimal, recommended, strict.\n");
+      process.exit(1);
     }
   }
 
@@ -171,9 +188,9 @@ function parseArgs(argv) {
 
 function printUsageAndExit(code) {
   process.stderr.write(
-    "Usage:\n" +
+      "Usage:\n" +
       "  archguard check [--config .archguard.yaml] [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
-      "  archguard init [--config .archguard.yaml] [--force]\n"
+      "  archguard init [--config .archguard.yaml] [--force] [--yes] [--preset <minimal|recommended|strict>] [--root <path1,path2>]\n"
   );
   process.exit(code);
 }
@@ -370,8 +387,7 @@ function validateFrontendPackageJson(config, service, servicePath, absolutePath,
   return findings;
 }
 
-function discoverServices() {
-  const roots = ["apps", "services"];
+function discoverServices(roots, inferenceMode) {
   const discovered = [];
 
   for (const root of roots) {
@@ -387,8 +403,7 @@ function discoverServices() {
       }
 
       const id = entry.name;
-      const lower = id.toLowerCase();
-      const type = lower.includes("web") || lower.includes("front") || lower.includes("client") ? "frontend" : "backend";
+      const type = inferServiceType(id, inferenceMode);
 
       discovered.push({
         id,
@@ -411,6 +426,137 @@ function discoverServices() {
   }
 
   return discovered;
+}
+
+function inferServiceType(serviceId, inferenceMode) {
+  if (inferenceMode === "backend") {
+    return "backend";
+  }
+
+  const lower = serviceId.toLowerCase();
+  if (lower.includes("web") || lower.includes("front") || lower.includes("client") || lower.includes("ui")) {
+    return "frontend";
+  }
+  return "backend";
+}
+
+function getRulesPreset(preset) {
+  if (preset === "minimal") {
+    return {
+      require_owner: "error",
+      no_frontend_db_access: "warn"
+    };
+  }
+
+  return {
+    no_frontend_db_access: "error",
+    require_owner: "error"
+  };
+}
+
+function getDefaultInitOptions() {
+  const defaults = detectDefaultRoots();
+  return {
+    roots: defaults,
+    inferenceMode: "auto",
+    preset: "recommended"
+  };
+}
+
+async function resolveInitOptions(args) {
+  const defaults = getDefaultInitOptions();
+  const flagRoots = args.root ? parseRootsAnswer(args.root, defaults.roots) : null;
+
+  if (args.yes || !process.stdin.isTTY || !process.stdout.isTTY) {
+    return {
+      roots: flagRoots || defaults.roots,
+      inferenceMode: "auto",
+      preset: args.preset || "recommended"
+    };
+  }
+
+  const interactive = await askInitOptions({
+    roots: flagRoots || defaults.roots,
+    preset: args.preset || "recommended"
+  });
+
+  return {
+    roots: interactive.roots,
+    inferenceMode: interactive.inferenceMode,
+    preset: interactive.preset
+  };
+}
+
+function detectDefaultRoots() {
+  const candidates = ["apps", "services", "src"];
+  const existing = candidates.filter((candidate) => {
+    const absolutePath = path.resolve(process.cwd(), candidate);
+    return fs.existsSync(absolutePath) && fs.statSync(absolutePath).isDirectory();
+  });
+
+  if (existing.length > 0) {
+    return existing;
+  }
+
+  return ["apps", "services"];
+}
+
+async function askInitOptions(defaults) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    const rootsAnswer = await rl.question(
+      `Service roots (comma-separated) [${defaults.roots.join(",")}]: `
+    );
+    const roots = parseRootsAnswer(rootsAnswer, defaults.roots);
+
+    const inferenceAnswer = await rl.question(
+      "Service type inference mode [auto/backend] (default: auto): "
+    );
+    const inferenceMode = normalizeChoice(inferenceAnswer, ["auto", "backend"], "auto");
+
+    const presetAnswer = await rl.question(
+      `Rules preset [minimal/recommended/strict] (default: ${defaults.preset}): `
+    );
+    const preset = normalizeChoice(presetAnswer, ["minimal", "recommended", "strict"], defaults.preset);
+
+    return { roots, inferenceMode, preset };
+  } finally {
+    rl.close();
+  }
+}
+
+function parseRootsAnswer(answer, fallbackRoots) {
+  if (!answer || !answer.trim()) {
+    return fallbackRoots;
+  }
+
+  const roots = answer
+    .split(",")
+    .map((entry) => normalizePath(entry.trim()))
+    .filter(Boolean);
+
+  if (roots.length === 0) {
+    return fallbackRoots;
+  }
+
+  return roots;
+}
+
+function normalizeChoice(answer, validChoices, fallback) {
+  if (!answer || !answer.trim()) {
+    return fallback;
+  }
+
+  const normalized = answer.trim().toLowerCase();
+  if (validChoices.includes(normalized)) {
+    return normalized;
+  }
+
+  return fallback;
 }
 
 function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked }) {
@@ -448,4 +594,7 @@ function renderReport({ findings, changedOnly, changedFilesConsidered, codeFiles
   return lines.join("\n");
 }
 
-main();
+main().catch((error) => {
+  process.stderr.write(`${error.message}\n`);
+  process.exit(1);
+});

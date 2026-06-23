@@ -12,6 +12,14 @@ This is the public rollout plan focused on user value and adoption.
 
 ## Milestone 1: Better onboarding
 
+Status: `in_progress`
+
+Progress update:
+
+- [x] Interactive setup wizard
+- [x] Presets (`minimal`, `recommended`, `strict`)
+- [ ] `doctor` command and stronger config diagnostics
+
 What users get:
 
 - Interactive setup wizard
