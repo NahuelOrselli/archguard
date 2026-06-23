@@ -18,7 +18,7 @@ Progress update:
 
 - [x] Interactive setup wizard
 - [x] Presets (`minimal`, `recommended`, `strict`)
-- [ ] `doctor` command and stronger config diagnostics
+- [x] `doctor` command and stronger config diagnostics
 
 What users get:
 

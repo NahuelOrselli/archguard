@@ -31,7 +31,7 @@ Goal: make onboarding and day-1 usage excellent.
 - [x] Non-interactive init modes
   - `archguard init --yes`
   - `archguard init --preset <name> --root <path>`
-- [ ] `archguard doctor` command
+- [x] `archguard doctor` command
   - Validate config file, paths, duplicated IDs, and malformed rules
 - [ ] Config polish
   - Clear validation errors with actionable fix hints

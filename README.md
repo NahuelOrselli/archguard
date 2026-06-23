@@ -43,6 +43,12 @@ npx @nahuelorselli/archguard init --preset minimal --root src
 npx @nahuelorselli/archguard init --config .archguard.yaml --force
 ```
 
+Validate config and paths:
+
+```bash
+npx @nahuelorselli/archguard doctor
+```
+
 ## Install and run
 
 No global install required:
@@ -58,6 +64,7 @@ bunx @nahuelorselli/archguard check
 ```bash
 npm install
 npm run archguard
+npm run archguard:doctor
 ```
 
 Changed files mode:

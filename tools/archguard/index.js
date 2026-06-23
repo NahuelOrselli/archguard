@@ -15,6 +15,7 @@ const DB_CLIENT_PACKAGES = new Set([
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
+const SUPPORTED_SERVICE_TYPES = new Set(["frontend", "backend", "worker"]);
 const DEFAULT_CONFIG_NAME = ".archguard.yaml";
 const CONFIG_CANDIDATES = [DEFAULT_CONFIG_NAME, ".archguard.yml", ".arch.yaml", ".arch.yml"];
 
@@ -22,6 +23,11 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.command === "init") {
     await runInit(args);
+    return;
+  }
+
+  if (args.command === "doctor") {
+    runDoctor(args);
     return;
   }
 
@@ -112,6 +118,29 @@ function runCheck(args) {
   }
 }
 
+function runDoctor(args) {
+  const configPath = resolveExistingConfigPath(args.config);
+  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
+  const config = loadConfig(configPath);
+
+  const diagnostics = [];
+  validateConfigShape(config, configDisplayPath, diagnostics);
+  validateServices(config, configDisplayPath, diagnostics);
+  validateRules(config, configDisplayPath, diagnostics);
+
+  const report = renderDoctorReport({ diagnostics, configDisplayPath });
+
+  if (args.out) {
+    fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
+  }
+
+  process.stdout.write(report + "\n");
+
+  if (diagnostics.some((entry) => entry.level === "error")) {
+    process.exit(1);
+  }
+}
+
 async function runInit(args) {
   const configPath = resolveInitConfigPath(args.config);
   const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
@@ -188,9 +217,10 @@ function parseArgs(argv) {
 
 function printUsageAndExit(code) {
   process.stderr.write(
-      "Usage:\n" +
+    "Usage:\n" +
       "  archguard check [--config .archguard.yaml] [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
-      "  archguard init [--config .archguard.yaml] [--force] [--yes] [--preset <minimal|recommended|strict>] [--root <path1,path2>]\n"
+      "  archguard init [--config .archguard.yaml] [--force] [--yes] [--preset <minimal|recommended|strict>] [--root <path1,path2>]\n" +
+      "  archguard doctor [--config .archguard.yaml] [--out <file>]\n"
   );
   process.exit(code);
 }
@@ -557,6 +587,198 @@ function normalizeChoice(answer, validChoices, fallback) {
   }
 
   return fallback;
+}
+
+function validateConfigShape(config, configDisplayPath, diagnostics) {
+  const hasValidVersion = typeof config.version === "number";
+  if (!hasValidVersion) {
+    diagnostics.push({
+      level: "warn",
+      code: "config_missing_version",
+      location: configDisplayPath,
+      message: "`version` should be a number.",
+      fix: "set `version: 0` at the top level."
+    });
+  }
+
+  if (!Array.isArray(config.services)) {
+    diagnostics.push({
+      level: "error",
+      code: "config_invalid_services",
+      location: configDisplayPath,
+      message: "`services` must be an array.",
+      fix: "define `services` as a list of service objects."
+    });
+  }
+
+  if (config.rules && typeof config.rules !== "object") {
+    diagnostics.push({
+      level: "error",
+      code: "config_invalid_rules",
+      location: configDisplayPath,
+      message: "`rules` must be an object map.",
+      fix: "set `rules` with key-value pairs, e.g. `rule_id: error`."
+    });
+  }
+}
+
+function validateServices(config, configDisplayPath, diagnostics) {
+  if (!Array.isArray(config.services)) {
+    return;
+  }
+
+  if (config.services.length === 0) {
+    diagnostics.push({
+      level: "warn",
+      code: "services_empty",
+      location: configDisplayPath,
+      message: "No services declared.",
+      fix: "add at least one service entry in `services`."
+    });
+  }
+
+  const seenIds = new Map();
+  const seenPaths = new Map();
+
+  for (const service of config.services) {
+    const serviceId = typeof service.id === "string" ? service.id.trim() : "";
+    const servicePath = typeof service.path === "string" ? normalizePath(service.path.trim()) : "";
+    const serviceType = typeof service.type === "string" ? service.type.trim() : "";
+
+    if (!serviceId) {
+      diagnostics.push({
+        level: "error",
+        code: "service_missing_id",
+        location: configDisplayPath,
+        message: "A service is missing `id`.",
+        fix: "set a unique `id` for every service."
+      });
+    }
+
+    if (!servicePath) {
+      diagnostics.push({
+        level: "error",
+        code: "service_missing_path",
+        location: configDisplayPath,
+        message: `Service ${formatServiceLabel(serviceId)} is missing \`path\`.`,
+        fix: "set a valid relative path for each service."
+      });
+    } else {
+      const absolutePath = path.resolve(process.cwd(), servicePath);
+      if (!fs.existsSync(absolutePath)) {
+        diagnostics.push({
+          level: "warn",
+          code: "service_path_missing",
+          location: configDisplayPath,
+          message: `Service ${formatServiceLabel(serviceId)} path does not exist: ${servicePath}`,
+          fix: "update the service path or create the directory."
+        });
+      }
+    }
+
+    if (!SUPPORTED_SERVICE_TYPES.has(serviceType)) {
+      diagnostics.push({
+        level: "warn",
+        code: "service_unknown_type",
+        location: configDisplayPath,
+        message: `Service ${formatServiceLabel(serviceId)} has unsupported type: ${serviceType || "<empty>"}.`,
+        fix: "use one of: frontend, backend, worker."
+      });
+    }
+
+    if (serviceId) {
+      const previous = seenIds.get(serviceId);
+      if (previous) {
+        diagnostics.push({
+          level: "error",
+          code: "service_duplicate_id",
+          location: configDisplayPath,
+          message: `Duplicate service id: ${serviceId}.`,
+          fix: "ensure each service id is unique."
+        });
+      }
+      seenIds.set(serviceId, true);
+    }
+
+    if (servicePath) {
+      const previous = seenPaths.get(servicePath);
+      if (previous) {
+        diagnostics.push({
+          level: "warn",
+          code: "service_duplicate_path",
+          location: configDisplayPath,
+          message: `Multiple services share the same path: ${servicePath}.`,
+          fix: "assign distinct paths or collapse into one service."
+        });
+      }
+      seenPaths.set(servicePath, true);
+    }
+  }
+}
+
+function validateRules(config, configDisplayPath, diagnostics) {
+  if (!config.rules || typeof config.rules !== "object") {
+    return;
+  }
+
+  for (const [ruleId, value] of Object.entries(config.rules)) {
+    if (!SUPPORTED_RULES.includes(ruleId)) {
+      diagnostics.push({
+        level: "warn",
+        code: "rule_unknown",
+        location: configDisplayPath,
+        message: `Unknown rule id: ${ruleId}.`,
+        fix: `use supported rules: ${SUPPORTED_RULES.join(", ")}.`
+      });
+    }
+
+    if (!["off", "warn", "error"].includes(value)) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_invalid_severity",
+        location: configDisplayPath,
+        message: `Invalid severity for ${ruleId}: ${String(value)}.`,
+        fix: "use one of: off, warn, error."
+      });
+    }
+  }
+}
+
+function formatServiceLabel(serviceId) {
+  if (serviceId) {
+    return `\`${serviceId}\``;
+  }
+  return "<unknown>";
+}
+
+function renderDoctorReport({ diagnostics, configDisplayPath }) {
+  const lines = [];
+  const errors = diagnostics.filter((entry) => entry.level === "error");
+  const warnings = diagnostics.filter((entry) => entry.level === "warn");
+
+  lines.push("## Archguard Doctor Report");
+  lines.push("");
+  lines.push(`- Config: ${configDisplayPath}`);
+  lines.push(`- Errors: ${errors.length}`);
+  lines.push(`- Warnings: ${warnings.length}`);
+  lines.push("");
+
+  if (diagnostics.length === 0) {
+    lines.push("### Result");
+    lines.push("");
+    lines.push("No config issues found.");
+    return lines.join("\n");
+  }
+
+  lines.push("### Findings");
+  lines.push("");
+
+  for (const entry of diagnostics) {
+    lines.push(`- **${entry.level.toUpperCase()}** ${entry.code} in \`${entry.location}\`: ${entry.message}`);
+    lines.push(`  - How to fix: ${entry.fix}`);
+  }
+
+  return lines.join("\n");
 }
 
 function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked }) {

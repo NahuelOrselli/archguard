@@ -37,7 +37,8 @@
   "scripts": {
     "archguard": "node tools/archguard/index.js check",
     "archguard:changed": "node tools/archguard/index.js check --changed-only",
-    "archguard:init": "node tools/archguard/index.js init"
+    "archguard:init": "node tools/archguard/index.js init",
+    "archguard:doctor": "node tools/archguard/index.js doctor"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
