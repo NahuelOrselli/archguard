@@ -4,6 +4,20 @@ Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitH
 
 See `ROADMAP.md` for planned milestones and priorities.
 See `docs/ROADMAP_GTM.md` for user-facing rollout plan.
+See `docs/ADOPTION_CHECKLIST.md` for first 10 installs tracking.
+
+## 30-second quickstart
+
+```bash
+npx @nahuelorselli/archguard init --yes
+npx @nahuelorselli/archguard doctor
+npx @nahuelorselli/archguard check
+```
+
+Expected result:
+
+- `doctor` reports 0 errors on a valid config
+- `check` reports architecture violations only when rules are broken
 
 ## What this MVP does
 
@@ -48,6 +62,10 @@ Validate config and paths:
 ```bash
 npx @nahuelorselli/archguard doctor
 ```
+
+Share first-install feedback in:
+
+- `New issue -> Try Archguard (First install feedback)`
 
 ## Install and run
 

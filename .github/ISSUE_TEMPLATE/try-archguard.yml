@@ -1,0 +1,69 @@
+name: Try Archguard (First install feedback)
+description: Report first-install experience and setup friction
+title: "try-archguard: <short summary>"
+labels:
+  - feedback
+  - onboarding
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Archguard. This template helps us improve first-time setup and day-1 experience.
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - npx
+        - pnpm dlx
+        - bunx
+        - npm install
+    validations:
+      required: true
+
+  - type: input
+    id: command_ran
+    attributes:
+      label: Command you ran
+      placeholder: npx @nahuelorselli/archguard init --yes
+    validations:
+      required: true
+
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened
+      description: Include output and error messages if any.
+      placeholder: Paste command output here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: I expected init to detect my repo and generate a valid config.
+    validations:
+      required: true
+
+  - type: input
+    id: repo_shape
+    attributes:
+      label: Repo structure
+      placeholder: monorepo apps/*, single repo src/, etc.
+
+  - type: textarea
+    id: config_snippet
+    attributes:
+      label: Config snippet (optional)
+      description: Paste relevant part of `.archguard.yaml` if useful.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks run
+      options:
+        - label: I ran `archguard doctor`
+        - label: I ran `archguard check`
+        - label: I verified Node version is >= 18
