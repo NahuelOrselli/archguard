@@ -1,3 +1,5 @@
+import { Client } from "pg";
+
 export function getHealth(): string {
-  return "ok";
+  return `ok:${Client.name}`;
 }
