@@ -91,5 +91,10 @@ Each violation includes:
 
 ## Demo screenshots
 
-- Failing PR check screenshot: `docs/screenshots/pr-fail-check.png`
-- Passing PR check screenshot: `docs/screenshots/pr-pass-check.png`
+### Expected fail
+
+![Archguard failing PR check](docs/screenshots/pr-fail-check.png)
+
+### Expected pass
+
+![Archguard passing PR check](docs/screenshots/pr-pass-check.png)
