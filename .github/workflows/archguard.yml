@@ -32,7 +32,6 @@ jobs:
         continue-on-error: true
         run: |
           node tools/archguard/index.js check \
-            --config .arch.yaml \
             --changed-only \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \

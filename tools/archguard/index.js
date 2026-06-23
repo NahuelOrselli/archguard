@@ -14,6 +14,8 @@ const DB_CLIENT_PACKAGES = new Set([
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
+const DEFAULT_CONFIG_NAME = ".archguard.yaml";
+const CONFIG_CANDIDATES = [DEFAULT_CONFIG_NAME, ".archguard.yml", ".arch.yaml", ".arch.yml"];
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -30,7 +32,8 @@ function main() {
 }
 
 function runCheck(args) {
-  const configPath = path.resolve(process.cwd(), args.config || ".arch.yaml");
+  const configPath = resolveExistingConfigPath(args.config);
+  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   const config = loadConfig(configPath);
   const services = Array.isArray(config.services) ? config.services : [];
   const frontendServices = services.filter((service) => service.type === "frontend");
@@ -47,7 +50,7 @@ function runCheck(args) {
   });
 
   const findings = [];
-  findings.push(...validateRequireOwner(config, services));
+  findings.push(...validateRequireOwner(config, services, configDisplayPath));
 
   for (const service of frontendServices) {
     const servicePath = normalizePath(service.path || "");
@@ -94,7 +97,7 @@ function runCheck(args) {
     changedOnly: args.changedOnly,
     changedFilesConsidered: normalizedSourceFiles.length,
     codeFilesScanned: filesToScan.length,
-    modelFilesChecked: [".arch.yaml"]
+    modelFilesChecked: [configDisplayPath]
   });
 
   if (args.out) {
@@ -109,7 +112,8 @@ function runCheck(args) {
 }
 
 function runInit(args) {
-  const configPath = path.resolve(process.cwd(), args.config || ".arch.yaml");
+  const configPath = resolveInitConfigPath(args.config);
+  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   if (fs.existsSync(configPath) && !args.force) {
     process.stderr.write(`Config already exists at ${configPath}. Use --force to overwrite.\n`);
     process.exit(1);
@@ -127,13 +131,13 @@ function runInit(args) {
   };
 
   fs.writeFileSync(configPath, yaml.dump(config, { noRefs: true, lineWidth: 120 }), "utf8");
-  process.stdout.write(`Created ${path.relative(process.cwd(), configPath) || ".arch.yaml"} with ${discoveredServices.length} services.\n`);
+  process.stdout.write(`Created ${configDisplayPath} with ${discoveredServices.length} services.\n`);
 }
 
 function parseArgs(argv) {
   const args = {
     command: argv[0],
-    config: ".arch.yaml",
+    config: null,
     changedOnly: false,
     base: null,
     head: null,
@@ -168,10 +172,38 @@ function parseArgs(argv) {
 function printUsageAndExit(code) {
   process.stderr.write(
     "Usage:\n" +
-      "  archguard check --config .arch.yaml [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
-      "  archguard init [--config .arch.yaml] [--force]\n"
+      "  archguard check [--config .archguard.yaml] [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
+      "  archguard init [--config .archguard.yaml] [--force]\n"
   );
   process.exit(code);
+}
+
+function resolveExistingConfigPath(explicitPath) {
+  if (explicitPath) {
+    const resolved = path.resolve(process.cwd(), explicitPath);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`Config file not found: ${resolved}`);
+    }
+    return resolved;
+  }
+
+  for (const candidate of CONFIG_CANDIDATES) {
+    const candidatePath = path.resolve(process.cwd(), candidate);
+    if (fs.existsSync(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  throw new Error(
+    `Config file not found. Expected one of: ${CONFIG_CANDIDATES.join(", ")}. You can also pass --config <path>.`
+  );
+}
+
+function resolveInitConfigPath(explicitPath) {
+  if (explicitPath) {
+    return path.resolve(process.cwd(), explicitPath);
+  }
+  return path.resolve(process.cwd(), DEFAULT_CONFIG_NAME);
 }
 
 function loadConfig(configPath) {
@@ -181,7 +213,7 @@ function loadConfig(configPath) {
 
   const loaded = yaml.load(fs.readFileSync(configPath, "utf8"));
   if (!loaded || typeof loaded !== "object") {
-    throw new Error("Invalid .arch.yaml content");
+    throw new Error(`Invalid architecture config content: ${configPath}`);
   }
 
   return loaded;
@@ -286,7 +318,7 @@ function isInsidePath(filePath, parentPath) {
   return filePath === parentPath || filePath.startsWith(`${parentPath}/`);
 }
 
-function validateRequireOwner(config, services) {
+function validateRequireOwner(config, services, configDisplayPath) {
   const severity = getRuleSeverity(config, "require_owner");
   const findings = [];
   for (const service of services) {
@@ -296,9 +328,9 @@ function validateRequireOwner(config, services) {
         ruleId: "require_owner",
         severity,
         serviceId: service.id || "unknown",
-        filePath: ".arch.yaml",
+        filePath: configDisplayPath,
         reason: "services without an owner increase incident response and change risk.",
-        fix: "set `owner` on every service in .arch.yaml."
+        fix: `set \`owner\` on every service in ${configDisplayPath}.`
       });
     }
   }

@@ -35,9 +35,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "archguard": "node tools/archguard/index.js check --config .arch.yaml",
-    "archguard:changed": "node tools/archguard/index.js check --config .arch.yaml --changed-only",
-    "archguard:init": "node tools/archguard/index.js init --config .arch.yaml"
+    "archguard": "node tools/archguard/index.js check",
+    "archguard:changed": "node tools/archguard/index.js check --changed-only",
+    "archguard:init": "node tools/archguard/index.js init"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
