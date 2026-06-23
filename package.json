@@ -1,0 +1,13 @@
+{
+  "name": "archguard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PR-first architecture linting MVP",
+  "scripts": {
+    "archguard": "node tools/archguard/index.js check --config .arch.yaml",
+    "archguard:changed": "node tools/archguard/index.js check --config .arch.yaml --changed-only"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
