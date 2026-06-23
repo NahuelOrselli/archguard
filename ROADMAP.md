@@ -23,12 +23,12 @@ This roadmap defines the execution path to make Archguard a trusted, PR-first ar
 
 Goal: make onboarding and day-1 usage excellent.
 
-- [ ] Interactive `archguard init` wizard
+- [x] Interactive `archguard init` wizard
   - Detect repo shape (`monorepo` or `single-app`)
   - Ask service roots (`apps/*`, `services/*`, `src`, custom)
   - Assign service types (`frontend`, `backend`, `worker`)
   - Choose rules preset (`minimal`, `recommended`, `strict`)
-- [ ] Non-interactive init modes
+- [x] Non-interactive init modes
   - `archguard init --yes`
   - `archguard init --preset <name> --root <path>`
 - [ ] `archguard doctor` command
