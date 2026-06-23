@@ -4,7 +4,7 @@ Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitH
 
 ## What this MVP does
 
-- Reads architecture model from `.arch.yaml`
+- Reads architecture model from `.archguard.yaml`
 - Maps service paths in the repo
 - Enforces rules: `no_frontend_db_access`, `require_owner`
 - Posts a report in pull requests
@@ -19,19 +19,30 @@ If any file inside a frontend service imports one of these DB clients, CI fails:
 - `mysql2`
 - `mongodb`
 
-`require_owner` fails when a service in `.arch.yaml` has no `owner`.
+`require_owner` fails when a service in `.archguard.yaml` has no `owner`.
 
 ## Fast onboarding
 
-Create a starter `.arch.yaml` from your repo layout:
+Create a starter `.archguard.yaml` from your repo layout:
 
 ```bash
-npm run archguard:init
+npx @nahuelorselli/archguard init
 ```
 
 By default it discovers folders under `apps/*` and `services/*`.
+`archguard check` auto-discovers config in this order: `.archguard.yaml`, `.archguard.yml`, `.arch.yaml`, `.arch.yml`.
 
-## Local run
+## Install and run
+
+No global install required:
+
+```bash
+npx @nahuelorselli/archguard check
+pnpm dlx @nahuelorselli/archguard check
+bunx @nahuelorselli/archguard check
+```
+
+## Local development
 
 ```bash
 npm install
