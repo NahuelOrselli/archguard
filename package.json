@@ -5,7 +5,8 @@
   "description": "PR-first architecture linting MVP",
   "scripts": {
     "archguard": "node tools/archguard/index.js check --config .arch.yaml",
-    "archguard:changed": "node tools/archguard/index.js check --config .arch.yaml --changed-only"
+    "archguard:changed": "node tools/archguard/index.js check --config .arch.yaml --changed-only",
+    "archguard:init": "node tools/archguard/index.js init --config .arch.yaml"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"

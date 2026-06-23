@@ -13,13 +13,23 @@ const DB_CLIENT_PACKAGES = new Set([
 ]);
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
+const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.command === "init") {
+    runInit(args);
+    return;
+  }
+
   if (args.command !== "check") {
     printUsageAndExit(1);
   }
 
+  runCheck(args);
+}
+
+function runCheck(args) {
   const configPath = path.resolve(process.cwd(), args.config || ".arch.yaml");
   const config = loadConfig(configPath);
   const services = Array.isArray(config.services) ? config.services : [];
@@ -29,12 +39,16 @@ function main() {
     ? getChangedFiles(args.base, args.head)
     : getTrackedFiles();
 
-  const filesToScan = sourceFiles.filter((filePath) => {
+  const normalizedSourceFiles = sourceFiles.map(normalizePath);
+
+  const filesToScan = normalizedSourceFiles.filter((filePath) => {
     const ext = path.extname(filePath);
-    return CODE_EXTENSIONS.has(ext);
+    return CODE_EXTENSIONS.has(ext) || path.basename(filePath) === "package.json";
   });
 
   const findings = [];
+  findings.push(...validateRequireOwner(config, services));
+
   for (const service of frontendServices) {
     const servicePath = normalizePath(service.path || "");
     if (!servicePath) {
@@ -42,8 +56,7 @@ function main() {
     }
 
     for (const filePath of filesToScan) {
-      const normalizedFilePath = normalizePath(filePath);
-      if (!isInsidePath(normalizedFilePath, servicePath)) {
+      if (!isInsidePath(filePath, servicePath)) {
         continue;
       }
 
@@ -52,16 +65,24 @@ function main() {
         continue;
       }
 
-      const importedPackages = extractImports(fs.readFileSync(absolutePath, "utf8"));
-      for (const importedPackage of importedPackages) {
-        if (DB_CLIENT_PACKAGES.has(importedPackage)) {
+      if (path.basename(filePath) === "package.json") {
+        findings.push(...validateFrontendPackageJson(config, service, servicePath, absolutePath, filePath));
+        continue;
+      }
+
+      const importMatches = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
+      for (const match of importMatches) {
+        if (DB_CLIENT_PACKAGES.has(match.packageName)) {
           findings.push({
             ruleId: "no_frontend_db_access",
             severity: getRuleSeverity(config, "no_frontend_db_access"),
             serviceId: service.id || "unknown",
             servicePath,
-            filePath: normalizedFilePath,
-            importedPackage
+            filePath,
+            line: match.line,
+            importedPackage: match.packageName,
+            reason: "frontend-to-DB coupling bypasses the API boundary.",
+            fix: "move DB access to a backend service and expose an API endpoint."
           });
         }
       }
@@ -81,6 +102,28 @@ function main() {
   }
 }
 
+function runInit(args) {
+  const configPath = path.resolve(process.cwd(), args.config || ".arch.yaml");
+  if (fs.existsSync(configPath) && !args.force) {
+    process.stderr.write(`Config already exists at ${configPath}. Use --force to overwrite.\n`);
+    process.exit(1);
+  }
+
+  const discoveredServices = discoverServices();
+  const config = {
+    version: 0,
+    services: discoveredServices,
+    resources: [],
+    rules: {
+      no_frontend_db_access: "error",
+      require_owner: "error"
+    }
+  };
+
+  fs.writeFileSync(configPath, yaml.dump(config, { noRefs: true, lineWidth: 120 }), "utf8");
+  process.stdout.write(`Created ${path.relative(process.cwd(), configPath) || ".arch.yaml"} with ${discoveredServices.length} services.\n`);
+}
+
 function parseArgs(argv) {
   const args = {
     command: argv[0],
@@ -88,7 +131,8 @@ function parseArgs(argv) {
     changedOnly: false,
     base: null,
     head: null,
-    out: null
+    out: null,
+    force: false
   };
 
   for (let i = 1; i < argv.length; i += 1) {
@@ -107,6 +151,8 @@ function parseArgs(argv) {
     } else if (token === "--out") {
       args.out = argv[i + 1];
       i += 1;
+    } else if (token === "--force") {
+      args.force = true;
     }
   }
 
@@ -115,7 +161,9 @@ function parseArgs(argv) {
 
 function printUsageAndExit(code) {
   process.stderr.write(
-    "Usage: archguard check --config .arch.yaml [--changed-only --base <sha> --head <sha>] [--out <file>]\n"
+    "Usage:\n" +
+      "  archguard check --config .arch.yaml [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
+      "  archguard init [--config .arch.yaml] [--force]\n"
   );
   process.exit(code);
 }
@@ -184,25 +232,35 @@ function walkFiles(rootDir) {
   return files;
 }
 
-function extractImports(content) {
+function extractImportsWithLine(content) {
   const imports = [];
   const fromPattern = /from\s+["']([^"']+)["']/g;
   const requirePattern = /require\(\s*["']([^"']+)["']\s*\)/g;
   const dynamicImportPattern = /import\(\s*["']([^"']+)["']\s*\)/g;
 
-  collectMatches(fromPattern, content, imports);
-  collectMatches(requirePattern, content, imports);
-  collectMatches(dynamicImportPattern, content, imports);
+  collectMatchesWithLine(fromPattern, content, imports);
+  collectMatchesWithLine(requirePattern, content, imports);
+  collectMatchesWithLine(dynamicImportPattern, content, imports);
 
   return imports;
 }
 
-function collectMatches(pattern, content, output) {
+function collectMatchesWithLine(pattern, content, output) {
   let match = pattern.exec(content);
   while (match) {
-    output.push(match[1]);
+    output.push({ packageName: match[1], line: indexToLine(content, match.index) });
     match = pattern.exec(content);
   }
+}
+
+function indexToLine(content, index) {
+  let line = 1;
+  for (let i = 0; i < index; i += 1) {
+    if (content[i] === "\n") {
+      line += 1;
+    }
+  }
+  return line;
 }
 
 function getRuleSeverity(config, ruleId) {
@@ -222,13 +280,109 @@ function isInsidePath(filePath, parentPath) {
   return filePath === parentPath || filePath.startsWith(`${parentPath}/`);
 }
 
+function validateRequireOwner(config, services) {
+  const severity = getRuleSeverity(config, "require_owner");
+  const findings = [];
+  for (const service of services) {
+    const owner = typeof service.owner === "string" ? service.owner.trim() : "";
+    if (!owner) {
+      findings.push({
+        ruleId: "require_owner",
+        severity,
+        serviceId: service.id || "unknown",
+        filePath: ".arch.yaml",
+        reason: "services without an owner increase incident response and change risk.",
+        fix: "set `owner` on every service in .arch.yaml."
+      });
+    }
+  }
+  return findings;
+}
+
+function validateFrontendPackageJson(config, service, servicePath, absolutePath, filePath) {
+  const findings = [];
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(absolutePath, "utf8"));
+  } catch {
+    return findings;
+  }
+
+  const deps = {
+    ...(parsed.dependencies || {}),
+    ...(parsed.devDependencies || {}),
+    ...(parsed.optionalDependencies || {})
+  };
+
+  for (const depName of Object.keys(deps)) {
+    if (DB_CLIENT_PACKAGES.has(depName)) {
+      findings.push({
+        ruleId: "no_frontend_db_access",
+        severity: getRuleSeverity(config, "no_frontend_db_access"),
+        serviceId: service.id || "unknown",
+        servicePath,
+        filePath,
+        importedPackage: depName,
+        reason: "frontend package depends on a DB client, which usually indicates direct DB access.",
+        fix: "remove DB client dependency from frontend and keep data access in backend services."
+      });
+    }
+  }
+
+  return findings;
+}
+
+function discoverServices() {
+  const roots = ["apps", "services"];
+  const discovered = [];
+
+  for (const root of roots) {
+    const absoluteRoot = path.resolve(process.cwd(), root);
+    if (!fs.existsSync(absoluteRoot) || !fs.statSync(absoluteRoot).isDirectory()) {
+      continue;
+    }
+
+    const entries = fs.readdirSync(absoluteRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const id = entry.name;
+      const lower = id.toLowerCase();
+      const type = lower.includes("web") || lower.includes("front") || lower.includes("client") ? "frontend" : "backend";
+
+      discovered.push({
+        id,
+        path: normalizePath(path.join(root, id)),
+        type,
+        owner: "TODO"
+      });
+    }
+  }
+
+  if (discovered.length === 0) {
+    return [
+      {
+        id: "app",
+        path: "apps/app",
+        type: "backend",
+        owner: "TODO"
+      }
+    ];
+  }
+
+  return discovered;
+}
+
 function renderReport({ findings, filesScanned, changedOnly }) {
   const lines = [];
   lines.push("## Archguard Report");
   lines.push("");
   lines.push(`- Mode: ${changedOnly ? "changed-only" : "all-tracked-files"}`);
   lines.push(`- Files scanned: ${filesScanned}`);
-  lines.push(`- Rule: no_frontend_db_access`);
+  lines.push(`- Rules: ${SUPPORTED_RULES.join(", ")}`);
+  lines.push(`- Violations: ${findings.length}`);
   lines.push("");
 
   if (findings.length === 0) {
@@ -242,11 +396,13 @@ function renderReport({ findings, filesScanned, changedOnly }) {
   lines.push("");
 
   for (const finding of findings) {
+    const location = finding.line ? `${finding.filePath}:${finding.line}` : finding.filePath;
+    const detail = finding.importedPackage ? ` imported DB client \`${finding.importedPackage}\`` : "";
     lines.push(
-      `- **${finding.severity.toUpperCase()}** ${finding.ruleId}: service \`${finding.serviceId}\` imported DB client \`${finding.importedPackage}\` in \`${finding.filePath}\`.`
+      `- **${finding.severity.toUpperCase()}** ${finding.ruleId}: service \`${finding.serviceId}\`${detail} in \`${location}\`.`
     );
-    lines.push("  - Why this matters: frontend-to-DB coupling bypasses the API boundary.");
-    lines.push("  - How to fix: move DB access to a backend service and expose an API endpoint.");
+    lines.push(`  - Why this matters: ${finding.reason}`);
+    lines.push(`  - How to fix: ${finding.fix}`);
   }
 
   return lines.join("\n");
