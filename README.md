@@ -35,6 +35,14 @@ npx @nahuelorselli/archguard init
 By default it discovers folders under `apps/*` and `services/*`.
 `archguard check` auto-discovers config in this order: `.archguard.yaml`, `.archguard.yml`, `.arch.yaml`, `.arch.yml`.
 
+Useful init flags:
+
+```bash
+npx @nahuelorselli/archguard init --yes
+npx @nahuelorselli/archguard init --preset minimal --root src
+npx @nahuelorselli/archguard init --config .archguard.yaml --force
+```
+
 ## Install and run
 
 No global install required:
