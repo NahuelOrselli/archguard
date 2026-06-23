@@ -63,7 +63,7 @@ On each PR, the workflow:
 2. Add:
 
 ```ts
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from '@prisma/client'
 ```
 
 3. Open PR
@@ -83,3 +83,13 @@ Each violation includes:
 - exact file (and line for code imports)
 - why the change is risky
 - how to fix it
+
+## Live demo PRs
+
+- Expected fail (frontend DB access): `https://github.com/NahuelOrselli/archguard/pull/6`
+- Expected pass (safe API-only change): `https://github.com/NahuelOrselli/archguard/pull/5`
+
+## Demo screenshots
+
+- Failing PR check screenshot: `docs/screenshots/pr-fail-check.png`
+- Passing PR check screenshot: `docs/screenshots/pr-pass-check.png`
