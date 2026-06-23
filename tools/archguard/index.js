@@ -89,7 +89,13 @@ function runCheck(args) {
     }
   }
 
-  const report = renderReport({ findings, filesScanned: filesToScan.length, changedOnly: args.changedOnly });
+  const report = renderReport({
+    findings,
+    changedOnly: args.changedOnly,
+    changedFilesConsidered: normalizedSourceFiles.length,
+    codeFilesScanned: filesToScan.length,
+    modelFilesChecked: [".arch.yaml"]
+  });
 
   if (args.out) {
     fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
@@ -375,12 +381,14 @@ function discoverServices() {
   return discovered;
 }
 
-function renderReport({ findings, filesScanned, changedOnly }) {
+function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked }) {
   const lines = [];
   lines.push("## Archguard Report");
   lines.push("");
   lines.push(`- Mode: ${changedOnly ? "changed-only" : "all-tracked-files"}`);
-  lines.push(`- Files scanned: ${filesScanned}`);
+  lines.push(`- Changed files considered: ${changedFilesConsidered}`);
+  lines.push(`- Code files scanned: ${codeFilesScanned}`);
+  lines.push(`- Model files checked: ${modelFilesChecked.join(", ")}`);
   lines.push(`- Rules: ${SUPPORTED_RULES.join(", ")}`);
   lines.push(`- Violations: ${findings.length}`);
   lines.push("");
