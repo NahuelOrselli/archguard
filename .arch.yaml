@@ -18,3 +18,4 @@ resources:
 
 rules:
   no_frontend_db_access: error
+  require_owner: error

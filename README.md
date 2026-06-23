@@ -1,12 +1,12 @@
-# archguard MVP (PR-first)
+# archguard (PR-first)
 
-Minimal Architecture-as-Code demo focused on one rule running in GitHub Actions.
+Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitHub Actions.
 
 ## What this MVP does
 
 - Reads architecture model from `.arch.yaml`
 - Maps service paths in the repo
-- Enforces one rule: `no_frontend_db_access`
+- Enforces rules: `no_frontend_db_access`, `require_owner`
 - Posts a report in pull requests
 - Fails CI when the rule is violated
 
@@ -18,6 +18,18 @@ If any file inside a frontend service imports one of these DB clients, CI fails:
 - `pg`
 - `mysql2`
 - `mongodb`
+
+`require_owner` fails when a service in `.arch.yaml` has no `owner`.
+
+## Fast onboarding
+
+Create a starter `.arch.yaml` from your repo layout:
+
+```bash
+npm run archguard:init
+```
+
+By default it discovers folders under `apps/*` and `services/*`.
 
 ## Local run
 
@@ -63,3 +75,11 @@ import { PrismaClient } from "@prisma/client";
 2. Keep DB access in `apps/api`
 3. Push update
 4. Expected: passing check and clean report
+
+## Report output
+
+Each violation includes:
+
+- exact file (and line for code imports)
+- why the change is risky
+- how to fix it
