@@ -9,7 +9,7 @@ services:
   - id: api
     path: apps/api
     type: backend
-    owner: team-core
+    owner: ""
 
 resources:
   - id: users-db
