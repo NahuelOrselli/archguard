@@ -2,6 +2,8 @@
 
 Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitHub Actions.
 
+See `ROADMAP.md` for planned milestones and priorities.
+
 ## What this MVP does
 
 - Reads architecture model from `.archguard.yaml`
