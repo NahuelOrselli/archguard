@@ -26,12 +26,22 @@ If any file inside a frontend service imports one of these DB clients, CI fails:
 Create a starter `.arch.yaml` from your repo layout:
 
 ```bash
-npm run archguard:init
+npx @nahuelorselli/archguard init --config .arch.yaml
 ```
 
 By default it discovers folders under `apps/*` and `services/*`.
 
-## Local run
+## Install and run
+
+No global install required:
+
+```bash
+npx @nahuelorselli/archguard check --config .arch.yaml
+pnpm dlx @nahuelorselli/archguard check --config .arch.yaml
+bunx @nahuelorselli/archguard check --config .arch.yaml
+```
+
+## Local development
 
 ```bash
 npm install
