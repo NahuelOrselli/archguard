@@ -43,6 +43,7 @@ function runCheck(args) {
   const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   const config = loadConfig(configPath);
   const dbClientPackages = resolveDbClientPackages(config);
+  const enabledTemplateIds = getEnabledRuleTemplateIds(config);
   const services = Array.isArray(config.services) ? config.services : [];
   const frontendServices = services.filter((service) => service.type === "frontend");
 
@@ -107,7 +108,8 @@ function runCheck(args) {
     changedFilesConsidered: normalizedSourceFiles.length,
     codeFilesScanned: filesToScan.length,
     modelFilesChecked: [configDisplayPath],
-    dbClientPackagesCount: dbClientPackages.size
+    dbClientPackagesCount: dbClientPackages.size,
+    enabledTemplateIds
   });
 
   if (args.out) {
@@ -564,6 +566,30 @@ function detectServiceIdByFilePath(services, filePath) {
     }
   }
   return "unknown";
+}
+
+function getEnabledRuleTemplateIds(config) {
+  const templates = Array.isArray(config.rule_templates) ? config.rule_templates : [];
+  const ids = [];
+
+  for (const template of templates) {
+    if (!template || typeof template !== "object") {
+      continue;
+    }
+
+    if (template.enabled === false) {
+      continue;
+    }
+
+    const templateId = typeof template.id === "string" ? template.id.trim() : "";
+    if (!templateId) {
+      continue;
+    }
+
+    ids.push(templateId);
+  }
+
+  return ids;
 }
 
 function discoverServices(roots, inferenceMode) {
@@ -1080,7 +1106,15 @@ function renderDoctorReport({ diagnostics, configDisplayPath }) {
   return lines.join("\n");
 }
 
-function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked, dbClientPackagesCount }) {
+function renderReport({
+  findings,
+  changedOnly,
+  changedFilesConsidered,
+  codeFilesScanned,
+  modelFilesChecked,
+  dbClientPackagesCount,
+  enabledTemplateIds
+}) {
   const lines = [];
   lines.push("## Archguard Report");
   lines.push("");
@@ -1089,7 +1123,10 @@ function renderReport({ findings, changedOnly, changedFilesConsidered, codeFiles
   lines.push(`- Code files scanned: ${codeFilesScanned}`);
   lines.push(`- Model files checked: ${modelFilesChecked.join(", ")}`);
   lines.push(`- DB client detector packages: ${dbClientPackagesCount}`);
-  lines.push(`- Rules: ${SUPPORTED_RULES.join(", ")}`);
+  lines.push(`- Built-in rules: ${SUPPORTED_RULES.join(", ")}`);
+  lines.push(
+    `- Rule templates: ${enabledTemplateIds.length > 0 ? enabledTemplateIds.join(", ") : "none"}`
+  );
   lines.push(`- Violations: ${findings.length}`);
   lines.push("");
 
