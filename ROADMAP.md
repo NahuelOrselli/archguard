@@ -23,6 +23,8 @@ This roadmap defines the execution path to make Archguard a trusted, PR-first ar
 
 Goal: make onboarding and day-1 usage excellent.
 
+Priority note: current focus is extensibility and confidence for early adopters.
+
 - [x] Interactive `archguard init` wizard
   - Detect repo shape (`monorepo` or `single-app`)
   - Ask service roots (`apps/*`, `services/*`, `src`, custom)
@@ -38,6 +40,12 @@ Goal: make onboarding and day-1 usage excellent.
   - Stable schema docs for `.archguard.yaml`
 - [ ] Better PR output readability
   - Group violations by service and by rule
+- [ ] Detector configurability (no code change required)
+  - Configure DB client package list in `.archguard.yaml`
+  - Keep built-in defaults as fallback
+- [ ] Rule templates (v0.2 scope)
+  - Add path-based boundary template (`from` + `deny_import`)
+  - Add allowed dependencies template per service
 
 Exit criteria:
 
@@ -50,6 +58,10 @@ Exit criteria:
 
 Goal: increase rule coverage while preserving precision.
 
+- [ ] Extensibility track
+  - Configurable detector packs (`db_clients`, import patterns)
+  - Rule template library with documented parameters
+  - Plugin hooks for organization-specific rules
 - [ ] Rule packs (`core`, `ownership`, `boundaries`)
 - [ ] New deterministic rules
   - `no_cross_service_internal_imports`
@@ -132,3 +144,9 @@ Exit criteria:
 - False-positive reports per rule
 - Repositories with check enforced on protected branches
 - Weekly active repos running Archguard in CI
+
+## First impression metrics (next 30 days)
+
+- First setup completed in < 5 minutes
+- Ability to express one custom policy without editing Archguard source
+- PR comment perceived as clear and actionable by first users

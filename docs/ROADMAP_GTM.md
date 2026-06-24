@@ -32,11 +32,19 @@ Success signal:
 
 ## Milestone 2: Stronger rule packs
 
+Status: `planned` (next priority)
+
+What changes based on user feedback:
+
+- Customizable detector inputs from config (for DB clients and patterns)
+- Rule templates so teams can add guardrails without modifying Archguard source
+
 What users get:
 
 - More boundary and ownership checks
 - Rule severity control (`off`, `warn`, `error`)
 - Temporary waivers with owner and expiration
+- Config-driven customization for common rule families
 
 Success signal:
 
