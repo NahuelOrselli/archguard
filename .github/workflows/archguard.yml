@@ -31,10 +31,17 @@ jobs:
         id: archguard
         continue-on-error: true
         run: |
+          if [ -f ".archguard-baseline.json" ]; then
+            BASELINE_ARG="--baseline .archguard-baseline.json"
+          else
+            BASELINE_ARG=""
+          fi
+
           node tools/archguard/index.js check \
             --changed-only \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
+            $BASELINE_ARG \
             --out archguard-report.md
 
       - name: Upload report artifact

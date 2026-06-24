@@ -138,6 +138,10 @@ On each PR, the workflow:
 3. comments the report in the PR
 4. fails the job if violations exist
 
+Gradual rollout tip:
+
+- Commit `.archguard-baseline.json` and the default workflow auto-applies `--baseline` when the file exists.
+
 ## End-to-end demo scenario
 
 ### PR that should fail
