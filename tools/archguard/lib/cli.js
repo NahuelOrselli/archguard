@@ -8,13 +8,15 @@ const yaml = require("js-yaml");
 const { runCheck } = require("./commands/check");
 const { runDoctor } = require("./commands/doctor");
 const { runInit } = require("./commands/init");
-
-const DEFAULT_DB_CLIENT_PACKAGES = [
-  "@prisma/client",
-  "pg",
-  "mysql2",
-  "mongodb"
-];
+const {
+  resolveDbClientPackages,
+  validateDetectors
+} = require("./rules/detectors");
+const {
+  evaluateRuleTemplates,
+  getEnabledRuleTemplateIds,
+  validateRuleTemplates
+} = require("./rules/templates");
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
@@ -61,7 +63,16 @@ function createCommandContext() {
     resolveDbClientPackages,
     getEnabledRuleTemplateIds,
     validateRequireOwner,
-    evaluateRuleTemplates,
+    evaluateRuleTemplates: (config, services, filesToScan) =>
+      evaluateRuleTemplates(config, services, filesToScan, {
+        fs,
+        path,
+        codeExtensions: CODE_EXTENSIONS,
+        cwd: process.cwd(),
+        normalizePath,
+        isInsidePath,
+        extractImportsWithLine
+      }),
     isInsidePath,
     validateFrontendPackageJson,
     extractImportsWithLine,
@@ -274,27 +285,6 @@ function getRuleSeverity(config, ruleId) {
   return "error";
 }
 
-function resolveDbClientPackages(config) {
-  const defaults = new Set(DEFAULT_DB_CLIENT_PACKAGES);
-  const detectors = config.detectors && typeof config.detectors === "object" ? config.detectors : {};
-  const mode = detectors.db_client_packages_mode === "replace" ? "replace" : "extend";
-  const customPackages = Array.isArray(detectors.db_client_packages)
-    ? detectors.db_client_packages
-        .map((value) => (typeof value === "string" ? value.trim() : ""))
-        .filter(Boolean)
-    : [];
-
-  if (mode === "replace") {
-    return new Set(customPackages);
-  }
-
-  for (const packageName of customPackages) {
-    defaults.add(packageName);
-  }
-
-  return defaults;
-}
-
 function normalizePath(value) {
   return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
 }
@@ -354,152 +344,6 @@ function validateFrontendPackageJson(config, service, servicePath, absolutePath,
   }
 
   return findings;
-}
-
-function evaluateRuleTemplates(config, services, filesToScan) {
-  const templates = Array.isArray(config.rule_templates) ? config.rule_templates : [];
-  const findings = [];
-
-  for (const template of templates) {
-    if (!template || typeof template !== "object") {
-      continue;
-    }
-
-    if (template.type !== "no_path_imports") {
-      continue;
-    }
-
-    if (template.enabled === false) {
-      continue;
-    }
-
-    const fromPattern = normalizePath(String(template.from || "").trim());
-    const denyPattern = normalizePath(String(template.deny_import || "").trim());
-    if (!fromPattern || !denyPattern) {
-      continue;
-    }
-
-    const severity = ["off", "warn", "error"].includes(template.severity) ? template.severity : "error";
-    if (severity === "off") {
-      continue;
-    }
-
-    for (const filePath of filesToScan) {
-      const ext = path.extname(filePath);
-      if (!CODE_EXTENSIONS.has(ext)) {
-        continue;
-      }
-
-      if (!wildcardMatch(fromPattern, filePath)) {
-        continue;
-      }
-
-      const absolutePath = path.resolve(process.cwd(), filePath);
-      if (!fs.existsSync(absolutePath)) {
-        continue;
-      }
-
-      const imports = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
-      for (const imported of imports) {
-        const targetPath = resolveImportTarget(filePath, imported.importPath);
-        if (!wildcardMatch(denyPattern, targetPath)) {
-          continue;
-        }
-
-        findings.push({
-          ruleId: template.id || "no_path_imports",
-          severity,
-          serviceId: detectServiceIdByFilePath(services, filePath),
-          filePath,
-          line: imported.line,
-          detail: ` imported path \`${imported.importPath}\``,
-          reason: `imports from \`${filePath}\` match deny pattern \`${denyPattern}\`.`,
-          fix: `update boundaries or change template \`${template.id || "no_path_imports"}\` patterns.`
-        });
-      }
-    }
-  }
-
-  return findings;
-}
-
-function resolveImportTarget(sourceFilePath, importPath) {
-  const normalizedImport = normalizePath(importPath);
-  if (!normalizedImport.startsWith(".")) {
-    return normalizedImport;
-  }
-
-  const sourceDir = path.dirname(path.resolve(process.cwd(), sourceFilePath));
-  const absoluteTarget = path.resolve(sourceDir, normalizedImport);
-  const resolved = resolveCodePath(absoluteTarget);
-  return normalizePath(path.relative(process.cwd(), resolved));
-}
-
-function resolveCodePath(absoluteBasePath) {
-  const candidates = [absoluteBasePath];
-  for (const ext of CODE_EXTENSIONS) {
-    candidates.push(`${absoluteBasePath}${ext}`);
-  }
-
-  for (const ext of CODE_EXTENSIONS) {
-    candidates.push(path.join(absoluteBasePath, `index${ext}`));
-  }
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-      return candidate;
-    }
-  }
-
-  return absoluteBasePath;
-}
-
-function wildcardMatch(pattern, value) {
-  const regex = wildcardToRegExp(pattern);
-  return regex.test(value);
-}
-
-function wildcardToRegExp(pattern) {
-  const escaped = normalizePath(pattern)
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "::DOUBLE_STAR::")
-    .replace(/\*/g, "[^/]*")
-    .replace(/::DOUBLE_STAR::/g, ".*");
-  return new RegExp(`^${escaped}$`);
-}
-
-function detectServiceIdByFilePath(services, filePath) {
-  for (const service of services) {
-    const servicePath = normalizePath(service.path || "");
-    if (servicePath && isInsidePath(filePath, servicePath)) {
-      return service.id || "unknown";
-    }
-  }
-  return "unknown";
-}
-
-function getEnabledRuleTemplateIds(config) {
-  const templates = Array.isArray(config.rule_templates) ? config.rule_templates : [];
-  const ids = [];
-
-  for (const template of templates) {
-    if (!template || typeof template !== "object") {
-      continue;
-    }
-
-    if (template.enabled === false) {
-      continue;
-    }
-
-    const templateId = typeof template.id === "string" ? template.id.trim() : "";
-    if (!templateId) {
-      continue;
-    }
-
-    ids.push(templateId);
-  }
-
-  return ids;
 }
 
 function discoverServices(roots, inferenceMode) {
@@ -704,156 +548,6 @@ function validateConfigShape(config, configDisplayPath, diagnostics) {
       message: "`rules` must be an object map.",
       fix: "set `rules` with key-value pairs, e.g. `rule_id: error`."
     });
-  }
-}
-
-function validateDetectors(config, configDisplayPath, diagnostics) {
-  if (!config.detectors) {
-    return;
-  }
-
-  if (typeof config.detectors !== "object" || Array.isArray(config.detectors)) {
-    diagnostics.push({
-      level: "error",
-      code: "detectors_invalid_shape",
-      location: configDisplayPath,
-      message: "`detectors` must be an object.",
-      fix: "set `detectors` as an object map."
-    });
-    return;
-  }
-
-  const mode = config.detectors.db_client_packages_mode;
-  if (mode !== undefined && !["extend", "replace"].includes(mode)) {
-    diagnostics.push({
-      level: "error",
-      code: "detectors_invalid_db_mode",
-      location: configDisplayPath,
-      message: `Invalid db client detector mode: ${String(mode)}.`,
-      fix: "use `db_client_packages_mode: extend` or `replace`."
-    });
-  }
-
-  const packages = config.detectors.db_client_packages;
-  if (packages === undefined) {
-    return;
-  }
-
-  if (!Array.isArray(packages)) {
-    diagnostics.push({
-      level: "error",
-      code: "detectors_invalid_db_list",
-      location: configDisplayPath,
-      message: "`detectors.db_client_packages` must be an array.",
-      fix: "set it as a list of package names."
-    });
-    return;
-  }
-
-  for (const value of packages) {
-    if (typeof value !== "string" || !value.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "detectors_invalid_db_item",
-        location: configDisplayPath,
-        message: "`detectors.db_client_packages` contains invalid values.",
-        fix: "use non-empty string package names only."
-      });
-      break;
-    }
-  }
-}
-
-function validateRuleTemplates(config, configDisplayPath, diagnostics) {
-  if (config.rule_templates === undefined) {
-    return;
-  }
-
-  if (!Array.isArray(config.rule_templates)) {
-    diagnostics.push({
-      level: "error",
-      code: "rule_templates_invalid_shape",
-      location: configDisplayPath,
-      message: "`rule_templates` must be an array.",
-      fix: "set `rule_templates` as a list of template objects."
-    });
-    return;
-  }
-
-  const seenTemplateIds = new Set();
-
-  for (const template of config.rule_templates) {
-    if (!template || typeof template !== "object" || Array.isArray(template)) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_invalid_item",
-        location: configDisplayPath,
-        message: "`rule_templates` contains an invalid entry.",
-        fix: "each template must be an object."
-      });
-      continue;
-    }
-
-    if (template.type !== "no_path_imports") {
-      diagnostics.push({
-        level: "warn",
-        code: "rule_template_unknown_type",
-        location: configDisplayPath,
-        message: `Unknown template type: ${String(template.type)}.`,
-        fix: "use `type: no_path_imports` for now."
-      });
-      continue;
-    }
-
-    if (typeof template.id !== "string" || !template.id.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_missing_id",
-        location: configDisplayPath,
-        message: "Template missing `id`.",
-        fix: "set a unique template `id`."
-      });
-    } else if (seenTemplateIds.has(template.id.trim())) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_duplicate_id",
-        location: configDisplayPath,
-        message: `Duplicate template id: ${template.id.trim()}.`,
-        fix: "use unique ids across `rule_templates`."
-      });
-    } else {
-      seenTemplateIds.add(template.id.trim());
-    }
-
-    if (typeof template.from !== "string" || !template.from.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_missing_from",
-        location: configDisplayPath,
-        message: `Template ${String(template.id || "<unknown>")} is missing \`from\`.`,
-        fix: "set a wildcard path pattern in `from`."
-      });
-    }
-
-    if (typeof template.deny_import !== "string" || !template.deny_import.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_missing_deny_import",
-        location: configDisplayPath,
-        message: `Template ${String(template.id || "<unknown>")} is missing \`deny_import\`.`,
-        fix: "set a wildcard path pattern in `deny_import`."
-      });
-    }
-
-    if (template.severity !== undefined && !["off", "warn", "error"].includes(template.severity)) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_invalid_severity",
-        location: configDisplayPath,
-        message: `Template ${String(template.id || "<unknown>")} has invalid severity: ${String(template.severity)}.`,
-        fix: "use one of: off, warn, error."
-      });
-    }
   }
 }
 
