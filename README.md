@@ -38,6 +38,17 @@ If any file inside a frontend service imports one of these DB clients, CI fails:
 
 `require_owner` fails when a service in `.archguard.yaml` has no `owner`.
 
+Customize DB client detector packages in config:
+
+```yaml
+detectors:
+  db_client_packages_mode: extend
+  db_client_packages:
+    - drizzle-orm
+    - knex
+    - typeorm
+```
+
 ## Fast onboarding
 
 Create a starter `.archguard.yaml` from your repo layout:

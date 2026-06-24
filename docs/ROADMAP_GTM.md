@@ -36,7 +36,8 @@ Status: `planned` (next priority)
 
 What changes based on user feedback:
 
-- Customizable detector inputs from config (for DB clients and patterns)
+- [x] Customizable detector inputs from config (DB client packages)
+- [ ] Extended detector inputs from config (import patterns)
 - Rule templates so teams can add guardrails without modifying Archguard source
 
 What users get:

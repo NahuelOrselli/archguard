@@ -40,7 +40,7 @@ Priority note: current focus is extensibility and confidence for early adopters.
   - Stable schema docs for `.archguard.yaml`
 - [ ] Better PR output readability
   - Group violations by service and by rule
-- [ ] Detector configurability (no code change required)
+- [x] Detector configurability (no code change required)
   - Configure DB client package list in `.archguard.yaml`
   - Keep built-in defaults as fallback
 - [ ] Rule templates (v0.2 scope)

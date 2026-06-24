@@ -6,12 +6,12 @@ const readline = require("node:readline/promises");
 const { execSync } = require("node:child_process");
 const yaml = require("js-yaml");
 
-const DB_CLIENT_PACKAGES = new Set([
+const DEFAULT_DB_CLIENT_PACKAGES = [
   "@prisma/client",
   "pg",
   "mysql2",
   "mongodb"
-]);
+];
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
@@ -42,6 +42,7 @@ function runCheck(args) {
   const configPath = resolveExistingConfigPath(args.config);
   const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   const config = loadConfig(configPath);
+  const dbClientPackages = resolveDbClientPackages(config);
   const services = Array.isArray(config.services) ? config.services : [];
   const frontendServices = services.filter((service) => service.type === "frontend");
 
@@ -82,7 +83,7 @@ function runCheck(args) {
 
       const importMatches = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
       for (const match of importMatches) {
-        if (DB_CLIENT_PACKAGES.has(match.packageName)) {
+        if (dbClientPackages.has(match.packageName)) {
           findings.push({
             ruleId: "no_frontend_db_access",
             severity: getRuleSeverity(config, "no_frontend_db_access"),
@@ -104,7 +105,8 @@ function runCheck(args) {
     changedOnly: args.changedOnly,
     changedFilesConsidered: normalizedSourceFiles.length,
     codeFilesScanned: filesToScan.length,
-    modelFilesChecked: [configDisplayPath]
+    modelFilesChecked: [configDisplayPath],
+    dbClientPackagesCount: dbClientPackages.size
   });
 
   if (args.out) {
@@ -125,6 +127,7 @@ function runDoctor(args) {
 
   const diagnostics = [];
   validateConfigShape(config, configDisplayPath, diagnostics);
+  validateDetectors(config, configDisplayPath, diagnostics);
   validateServices(config, configDisplayPath, diagnostics);
   validateRules(config, configDisplayPath, diagnostics);
 
@@ -357,6 +360,27 @@ function getRuleSeverity(config, ruleId) {
   return "error";
 }
 
+function resolveDbClientPackages(config) {
+  const defaults = new Set(DEFAULT_DB_CLIENT_PACKAGES);
+  const detectors = config.detectors && typeof config.detectors === "object" ? config.detectors : {};
+  const mode = detectors.db_client_packages_mode === "replace" ? "replace" : "extend";
+  const customPackages = Array.isArray(detectors.db_client_packages)
+    ? detectors.db_client_packages
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  if (mode === "replace") {
+    return new Set(customPackages);
+  }
+
+  for (const packageName of customPackages) {
+    defaults.add(packageName);
+  }
+
+  return defaults;
+}
+
 function normalizePath(value) {
   return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
 }
@@ -385,6 +409,7 @@ function validateRequireOwner(config, services, configDisplayPath) {
 }
 
 function validateFrontendPackageJson(config, service, servicePath, absolutePath, filePath) {
+  const dbClientPackages = resolveDbClientPackages(config);
   const findings = [];
   let parsed;
   try {
@@ -400,7 +425,7 @@ function validateFrontendPackageJson(config, service, servicePath, absolutePath,
   };
 
   for (const depName of Object.keys(deps)) {
-    if (DB_CLIENT_PACKAGES.has(depName)) {
+    if (dbClientPackages.has(depName)) {
       findings.push({
         ruleId: "no_frontend_db_access",
         severity: getRuleSeverity(config, "no_frontend_db_access"),
@@ -622,6 +647,63 @@ function validateConfigShape(config, configDisplayPath, diagnostics) {
   }
 }
 
+function validateDetectors(config, configDisplayPath, diagnostics) {
+  if (!config.detectors) {
+    return;
+  }
+
+  if (typeof config.detectors !== "object" || Array.isArray(config.detectors)) {
+    diagnostics.push({
+      level: "error",
+      code: "detectors_invalid_shape",
+      location: configDisplayPath,
+      message: "`detectors` must be an object.",
+      fix: "set `detectors` as an object map."
+    });
+    return;
+  }
+
+  const mode = config.detectors.db_client_packages_mode;
+  if (mode !== undefined && !["extend", "replace"].includes(mode)) {
+    diagnostics.push({
+      level: "error",
+      code: "detectors_invalid_db_mode",
+      location: configDisplayPath,
+      message: `Invalid db client detector mode: ${String(mode)}.`,
+      fix: "use `db_client_packages_mode: extend` or `replace`."
+    });
+  }
+
+  const packages = config.detectors.db_client_packages;
+  if (packages === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(packages)) {
+    diagnostics.push({
+      level: "error",
+      code: "detectors_invalid_db_list",
+      location: configDisplayPath,
+      message: "`detectors.db_client_packages` must be an array.",
+      fix: "set it as a list of package names."
+    });
+    return;
+  }
+
+  for (const value of packages) {
+    if (typeof value !== "string" || !value.trim()) {
+      diagnostics.push({
+        level: "error",
+        code: "detectors_invalid_db_item",
+        location: configDisplayPath,
+        message: "`detectors.db_client_packages` contains invalid values.",
+        fix: "use non-empty string package names only."
+      });
+      break;
+    }
+  }
+}
+
 function validateServices(config, configDisplayPath, diagnostics) {
   if (!Array.isArray(config.services)) {
     return;
@@ -781,7 +863,7 @@ function renderDoctorReport({ diagnostics, configDisplayPath }) {
   return lines.join("\n");
 }
 
-function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked }) {
+function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked, dbClientPackagesCount }) {
   const lines = [];
   lines.push("## Archguard Report");
   lines.push("");
@@ -789,6 +871,7 @@ function renderReport({ findings, changedOnly, changedFilesConsidered, codeFiles
   lines.push(`- Changed files considered: ${changedFilesConsidered}`);
   lines.push(`- Code files scanned: ${codeFilesScanned}`);
   lines.push(`- Model files checked: ${modelFilesChecked.join(", ")}`);
+  lines.push(`- DB client detector packages: ${dbClientPackagesCount}`);
   lines.push(`- Rules: ${SUPPORTED_RULES.join(", ")}`);
   lines.push(`- Violations: ${findings.length}`);
   lines.push("");
