@@ -17,17 +17,7 @@ function evaluateRuleTemplates(config, services, filesToScan, options) {
       continue;
     }
 
-    if (template.type !== "no_path_imports") {
-      continue;
-    }
-
     if (template.enabled === false) {
-      continue;
-    }
-
-    const fromPattern = normalizePath(String(template.from || "").trim());
-    const denyPattern = normalizePath(String(template.deny_import || "").trim());
-    if (!fromPattern || !denyPattern) {
       continue;
     }
 
@@ -36,45 +26,181 @@ function evaluateRuleTemplates(config, services, filesToScan, options) {
       continue;
     }
 
-    for (const filePath of filesToScan) {
-      const ext = path.extname(filePath);
-      if (!codeExtensions.has(ext)) {
-        continue;
-      }
-
-      if (!wildcardMatch(fromPattern, filePath, normalizePath)) {
-        continue;
-      }
-
-      const absolutePath = path.resolve(cwd, filePath);
-      if (!fs.existsSync(absolutePath)) {
-        continue;
-      }
-
-      const imports = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
-      for (const imported of imports) {
-        const targetPath = resolveImportTarget(filePath, imported.importPath, {
+    if (template.type === "no_path_imports") {
+      findings.push(
+        ...evaluateNoPathImportsTemplate(template, services, filesToScan, {
+          fs,
           path,
+          codeExtensions,
           cwd,
           normalizePath,
-          codeExtensions,
-          fs
-        });
-        if (!wildcardMatch(denyPattern, targetPath, normalizePath)) {
-          continue;
-        }
+          isInsidePath,
+          extractImportsWithLine,
+          severity
+        })
+      );
+      continue;
+    }
 
-        findings.push({
-          ruleId: template.id || "no_path_imports",
-          severity,
-          serviceId: detectServiceIdByFilePath(services, filePath, normalizePath, isInsidePath),
-          filePath,
-          line: imported.line,
-          detail: ` imported path \`${imported.importPath}\``,
-          reason: `imports from \`${filePath}\` match deny pattern \`${denyPattern}\`.`,
-          fix: `update boundaries or change template \`${template.id || "no_path_imports"}\` patterns.`
-        });
+    if (template.type === "allowed_service_dependencies") {
+      findings.push(
+        ...evaluateAllowedServiceDependenciesTemplate(template, services, filesToScan, {
+          fs,
+          path,
+          codeExtensions,
+          cwd,
+          normalizePath,
+          isInsidePath,
+          extractImportsWithLine,
+          severity
+        })
+      );
+    }
+  }
+
+  return findings;
+}
+
+function evaluateNoPathImportsTemplate(template, services, filesToScan, options) {
+  const {
+    fs,
+    path,
+    codeExtensions,
+    cwd,
+    normalizePath,
+    isInsidePath,
+    extractImportsWithLine,
+    severity
+  } = options;
+  const findings = [];
+  const fromPattern = normalizePath(String(template.from || "").trim());
+  const denyPattern = normalizePath(String(template.deny_import || "").trim());
+  if (!fromPattern || !denyPattern) {
+    return findings;
+  }
+
+  for (const filePath of filesToScan) {
+    const ext = path.extname(filePath);
+    if (!codeExtensions.has(ext)) {
+      continue;
+    }
+
+    if (!wildcardMatch(fromPattern, filePath, normalizePath)) {
+      continue;
+    }
+
+    const absolutePath = path.resolve(cwd, filePath);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    const imports = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
+    for (const imported of imports) {
+      const targetPath = resolveImportTarget(filePath, imported.importPath, {
+        path,
+        cwd,
+        normalizePath,
+        codeExtensions,
+        fs
+      });
+      if (!wildcardMatch(denyPattern, targetPath, normalizePath)) {
+        continue;
       }
+
+      findings.push({
+        ruleId: template.id || "no_path_imports",
+        severity,
+        serviceId: detectServiceIdByFilePath(services, filePath, normalizePath, isInsidePath),
+        filePath,
+        line: imported.line,
+        detail: ` imported path \`${imported.importPath}\``,
+        reason: `imports from \`${filePath}\` match deny pattern \`${denyPattern}\`.`,
+        fix: `update boundaries or change template \`${template.id || "no_path_imports"}\` patterns.`
+      });
+    }
+  }
+
+  return findings;
+}
+
+function evaluateAllowedServiceDependenciesTemplate(template, services, filesToScan, options) {
+  const {
+    fs,
+    path,
+    codeExtensions,
+    cwd,
+    normalizePath,
+    isInsidePath,
+    extractImportsWithLine,
+    severity
+  } = options;
+  const findings = [];
+  const serviceId = String(template.service || "").trim();
+  const allowPatterns = Array.isArray(template.allow)
+    ? template.allow.map((value) => normalizePath(String(value).trim())).filter(Boolean)
+    : [];
+  if (!serviceId || allowPatterns.length === 0) {
+    return findings;
+  }
+
+  const service = services.find((entry) => entry && String(entry.id || "").trim() === serviceId);
+  if (!service) {
+    return findings;
+  }
+
+  const servicePath = normalizePath(String(service.path || "").trim());
+  if (!servicePath) {
+    return findings;
+  }
+
+  for (const filePath of filesToScan) {
+    const ext = path.extname(filePath);
+    if (!codeExtensions.has(ext)) {
+      continue;
+    }
+
+    if (!isInsidePath(filePath, servicePath)) {
+      continue;
+    }
+
+    const absolutePath = path.resolve(cwd, filePath);
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    const imports = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
+    for (const imported of imports) {
+      if (!String(imported.importPath || "").startsWith(".")) {
+        continue;
+      }
+
+      const targetPath = resolveImportTarget(filePath, imported.importPath, {
+        path,
+        cwd,
+        normalizePath,
+        codeExtensions,
+        fs
+      });
+
+      if (isInsidePath(targetPath, servicePath)) {
+        continue;
+      }
+
+      const allowed = allowPatterns.some((pattern) => wildcardMatch(pattern, targetPath, normalizePath));
+      if (allowed) {
+        continue;
+      }
+
+      findings.push({
+        ruleId: template.id || "allowed_service_dependencies",
+        severity,
+        serviceId,
+        filePath,
+        line: imported.line,
+        detail: ` imported path \`${imported.importPath}\``,
+        reason: `service \`${serviceId}\` imported \`${targetPath}\`, which is outside allowed dependencies.`,
+        fix: `add an allow pattern or refactor the dependency to an allowed boundary.`
+      });
     }
   }
 
@@ -192,13 +318,13 @@ function validateRuleTemplates(config, configDisplayPath, diagnostics) {
       continue;
     }
 
-    if (template.type !== "no_path_imports") {
+    if (!["no_path_imports", "allowed_service_dependencies"].includes(template.type)) {
       diagnostics.push({
         level: "warn",
         code: "rule_template_unknown_type",
         location: configDisplayPath,
         message: `Unknown template type: ${String(template.type)}.`,
-        fix: "use `type: no_path_imports` for now."
+        fix: "use `type: no_path_imports` or `type: allowed_service_dependencies`."
       });
       continue;
     }
@@ -223,24 +349,48 @@ function validateRuleTemplates(config, configDisplayPath, diagnostics) {
       seenTemplateIds.add(template.id.trim());
     }
 
-    if (typeof template.from !== "string" || !template.from.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_missing_from",
-        location: configDisplayPath,
-        message: `Template ${String(template.id || "<unknown>")} is missing \`from\`.`,
-        fix: "set a wildcard path pattern in `from`."
-      });
+    if (template.type === "no_path_imports") {
+      if (typeof template.from !== "string" || !template.from.trim()) {
+        diagnostics.push({
+          level: "error",
+          code: "rule_template_missing_from",
+          location: configDisplayPath,
+          message: `Template ${String(template.id || "<unknown>")} is missing \`from\`.`,
+          fix: "set a wildcard path pattern in `from`."
+        });
+      }
+
+      if (typeof template.deny_import !== "string" || !template.deny_import.trim()) {
+        diagnostics.push({
+          level: "error",
+          code: "rule_template_missing_deny_import",
+          location: configDisplayPath,
+          message: `Template ${String(template.id || "<unknown>")} is missing \`deny_import\`.`,
+          fix: "set a wildcard path pattern in `deny_import`."
+        });
+      }
     }
 
-    if (typeof template.deny_import !== "string" || !template.deny_import.trim()) {
-      diagnostics.push({
-        level: "error",
-        code: "rule_template_missing_deny_import",
-        location: configDisplayPath,
-        message: `Template ${String(template.id || "<unknown>")} is missing \`deny_import\`.`,
-        fix: "set a wildcard path pattern in `deny_import`."
-      });
+    if (template.type === "allowed_service_dependencies") {
+      if (typeof template.service !== "string" || !template.service.trim()) {
+        diagnostics.push({
+          level: "error",
+          code: "rule_template_missing_service",
+          location: configDisplayPath,
+          message: `Template ${String(template.id || "<unknown>")} is missing \`service\`.`,
+          fix: "set the service id in `service`."
+        });
+      }
+
+      if (!Array.isArray(template.allow) || template.allow.length === 0) {
+        diagnostics.push({
+          level: "error",
+          code: "rule_template_missing_allow",
+          location: configDisplayPath,
+          message: `Template ${String(template.id || "<unknown>")} needs a non-empty \`allow\` list.`,
+          fix: "set `allow` as a list of wildcard path patterns."
+        });
+      }
     }
 
     if (template.severity !== undefined && !["off", "warn", "error"].includes(template.severity)) {

@@ -6,6 +6,7 @@ See `ROADMAP.md` for planned milestones and priorities.
 See `docs/ROADMAP_GTM.md` for user-facing rollout plan.
 See `docs/ADOPTION_CHECKLIST.md` for first 10 installs tracking.
 See `docs/CI_BASELINE_ROLLOUT.md` for Day 0 -> Day 1 rollout.
+See `docs/CONFIG_REFERENCE.md` for current config schema.
 
 ## 30-second quickstart
 
@@ -58,6 +59,19 @@ rule_templates:
     type: no_path_imports
     from: apps/web/**
     deny_import: apps/api/**
+    severity: error
+```
+
+Allow dependencies per service with a template:
+
+```yaml
+rule_templates:
+  - id: web-allowed-deps
+    type: allowed_service_dependencies
+    service: web
+    allow:
+      - apps/shared/**
+      - apps/contracts/**
     severity: error
 ```
 
