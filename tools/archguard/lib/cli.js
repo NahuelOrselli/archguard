@@ -5,6 +5,9 @@ const path = require("node:path");
 const readline = require("node:readline/promises");
 const { execSync } = require("node:child_process");
 const yaml = require("js-yaml");
+const { runCheck } = require("./commands/check");
+const { runDoctor } = require("./commands/doctor");
+const { runInit } = require("./commands/init");
 
 const DEFAULT_DB_CLIENT_PACKAGES = [
   "@prisma/client",
@@ -21,13 +24,15 @@ const CONFIG_CANDIDATES = [DEFAULT_CONFIG_NAME, ".archguard.yml", ".arch.yaml", 
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const commandContext = createCommandContext();
+
   if (args.command === "init") {
-    await runInit(args);
+    await runInit(args, commandContext);
     return;
   }
 
   if (args.command === "doctor") {
-    runDoctor(args);
+    runDoctor(args, commandContext);
     return;
   }
 
@@ -35,138 +40,43 @@ async function main() {
     printUsageAndExit(1);
   }
 
-  runCheck(args);
+  runCheck(args, commandContext);
 }
 
-function runCheck(args) {
-  const configPath = resolveExistingConfigPath(args.config);
-  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
-  const config = loadConfig(configPath);
-  const dbClientPackages = resolveDbClientPackages(config);
-  const enabledTemplateIds = getEnabledRuleTemplateIds(config);
-  const services = Array.isArray(config.services) ? config.services : [];
-  const frontendServices = services.filter((service) => service.type === "frontend");
-
-  const sourceFiles = args.changedOnly
-    ? getChangedFiles(args.base, args.head)
-    : getTrackedFiles();
-
-  const normalizedSourceFiles = sourceFiles.map(normalizePath);
-
-  const filesToScan = normalizedSourceFiles.filter((filePath) => {
-    const ext = path.extname(filePath);
-    return CODE_EXTENSIONS.has(ext) || path.basename(filePath) === "package.json";
-  });
-
-  const findings = [];
-  findings.push(...validateRequireOwner(config, services, configDisplayPath));
-  findings.push(...evaluateRuleTemplates(config, services, filesToScan));
-
-  for (const service of frontendServices) {
-    const servicePath = normalizePath(service.path || "");
-    if (!servicePath) {
-      continue;
-    }
-
-    for (const filePath of filesToScan) {
-      if (!isInsidePath(filePath, servicePath)) {
-        continue;
-      }
-
-      const absolutePath = path.resolve(process.cwd(), filePath);
-      if (!fs.existsSync(absolutePath)) {
-        continue;
-      }
-
-      if (path.basename(filePath) === "package.json") {
-        findings.push(...validateFrontendPackageJson(config, service, servicePath, absolutePath, filePath));
-        continue;
-      }
-
-      const importMatches = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
-      for (const match of importMatches) {
-        if (dbClientPackages.has(match.packageName)) {
-          findings.push({
-            ruleId: "no_frontend_db_access",
-            severity: getRuleSeverity(config, "no_frontend_db_access"),
-            serviceId: service.id || "unknown",
-            servicePath,
-            filePath,
-            line: match.line,
-            importedPackage: match.packageName,
-            reason: "frontend-to-DB coupling bypasses the API boundary.",
-            fix: "move DB access to a backend service and expose an API endpoint."
-          });
-        }
-      }
-    }
-  }
-
-  const report = renderReport({
-    findings,
-    changedOnly: args.changedOnly,
-    changedFilesConsidered: normalizedSourceFiles.length,
-    codeFilesScanned: filesToScan.length,
-    modelFilesChecked: [configDisplayPath],
-    dbClientPackagesCount: dbClientPackages.size,
-    enabledTemplateIds
-  });
-
-  if (args.out) {
-    fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
-  }
-
-  process.stdout.write(report + "\n");
-
-  if (findings.some((finding) => finding.severity === "error")) {
-    process.exit(1);
-  }
-}
-
-function runDoctor(args) {
-  const configPath = resolveExistingConfigPath(args.config);
-  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
-  const config = loadConfig(configPath);
-
-  const diagnostics = [];
-  validateConfigShape(config, configDisplayPath, diagnostics);
-  validateDetectors(config, configDisplayPath, diagnostics);
-  validateRuleTemplates(config, configDisplayPath, diagnostics);
-  validateServices(config, configDisplayPath, diagnostics);
-  validateRules(config, configDisplayPath, diagnostics);
-
-  const report = renderDoctorReport({ diagnostics, configDisplayPath });
-
-  if (args.out) {
-    fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
-  }
-
-  process.stdout.write(report + "\n");
-
-  if (diagnostics.some((entry) => entry.level === "error")) {
-    process.exit(1);
-  }
-}
-
-async function runInit(args) {
-  const configPath = resolveInitConfigPath(args.config);
-  const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
-  if (fs.existsSync(configPath) && !args.force) {
-    process.stderr.write(`Config already exists at ${configPath}. Use --force to overwrite.\n`);
-    process.exit(1);
-  }
-
-  const initOptions = await resolveInitOptions(args);
-  const discoveredServices = discoverServices(initOptions.roots, initOptions.inferenceMode);
-  const config = {
-    version: 0,
-    services: discoveredServices,
-    resources: [],
-    rules: getRulesPreset(initOptions.preset)
+function createCommandContext() {
+  return {
+    fs,
+    path,
+    yaml,
+    process,
+    CODE_EXTENSIONS,
+    SUPPORTED_RULES,
+    DEFAULT_CONFIG_NAME,
+    resolveExistingConfigPath,
+    resolveInitConfigPath,
+    loadConfig,
+    normalizePath,
+    getChangedFiles,
+    getTrackedFiles,
+    resolveDbClientPackages,
+    getEnabledRuleTemplateIds,
+    validateRequireOwner,
+    evaluateRuleTemplates,
+    isInsidePath,
+    validateFrontendPackageJson,
+    extractImportsWithLine,
+    getRuleSeverity,
+    renderReport,
+    validateConfigShape,
+    validateDetectors,
+    validateRuleTemplates,
+    validateServices,
+    validateRules,
+    renderDoctorReport,
+    resolveInitOptions,
+    discoverServices,
+    getRulesPreset
   };
-
-  fs.writeFileSync(configPath, yaml.dump(config, { noRefs: true, lineWidth: 120 }), "utf8");
-  process.stdout.write(`Created ${configDisplayPath} with ${discoveredServices.length} services.\n`);
 }
 
 function parseArgs(argv) {
