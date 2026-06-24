@@ -44,8 +44,8 @@ Priority note: current focus is extensibility and confidence for early adopters.
   - Configure DB client package list in `.archguard.yaml`
   - Keep built-in defaults as fallback
 - [ ] Rule templates (v0.2 scope)
-  - Add path-based boundary template (`from` + `deny_import`)
-  - Add allowed dependencies template per service
+  - [x] Add path-based boundary template (`from` + `deny_import`)
+  - [ ] Add allowed dependencies template per service
 
 Exit criteria:
 

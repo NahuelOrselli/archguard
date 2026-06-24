@@ -43,6 +43,7 @@ function runCheck(args) {
   const configDisplayPath = normalizePath(path.relative(process.cwd(), configPath)) || DEFAULT_CONFIG_NAME;
   const config = loadConfig(configPath);
   const dbClientPackages = resolveDbClientPackages(config);
+  const enabledTemplateIds = getEnabledRuleTemplateIds(config);
   const services = Array.isArray(config.services) ? config.services : [];
   const frontendServices = services.filter((service) => service.type === "frontend");
 
@@ -59,6 +60,7 @@ function runCheck(args) {
 
   const findings = [];
   findings.push(...validateRequireOwner(config, services, configDisplayPath));
+  findings.push(...evaluateRuleTemplates(config, services, filesToScan));
 
   for (const service of frontendServices) {
     const servicePath = normalizePath(service.path || "");
@@ -106,7 +108,8 @@ function runCheck(args) {
     changedFilesConsidered: normalizedSourceFiles.length,
     codeFilesScanned: filesToScan.length,
     modelFilesChecked: [configDisplayPath],
-    dbClientPackagesCount: dbClientPackages.size
+    dbClientPackagesCount: dbClientPackages.size,
+    enabledTemplateIds
   });
 
   if (args.out) {
@@ -128,6 +131,7 @@ function runDoctor(args) {
   const diagnostics = [];
   validateConfigShape(config, configDisplayPath, diagnostics);
   validateDetectors(config, configDisplayPath, diagnostics);
+  validateRuleTemplates(config, configDisplayPath, diagnostics);
   validateServices(config, configDisplayPath, diagnostics);
   validateRules(config, configDisplayPath, diagnostics);
 
@@ -336,7 +340,7 @@ function extractImportsWithLine(content) {
 function collectMatchesWithLine(pattern, content, output) {
   let match = pattern.exec(content);
   while (match) {
-    output.push({ packageName: match[1], line: indexToLine(content, match.index) });
+    output.push({ packageName: match[1], importPath: match[1], line: indexToLine(content, match.index) });
     match = pattern.exec(content);
   }
 }
@@ -440,6 +444,152 @@ function validateFrontendPackageJson(config, service, servicePath, absolutePath,
   }
 
   return findings;
+}
+
+function evaluateRuleTemplates(config, services, filesToScan) {
+  const templates = Array.isArray(config.rule_templates) ? config.rule_templates : [];
+  const findings = [];
+
+  for (const template of templates) {
+    if (!template || typeof template !== "object") {
+      continue;
+    }
+
+    if (template.type !== "no_path_imports") {
+      continue;
+    }
+
+    if (template.enabled === false) {
+      continue;
+    }
+
+    const fromPattern = normalizePath(String(template.from || "").trim());
+    const denyPattern = normalizePath(String(template.deny_import || "").trim());
+    if (!fromPattern || !denyPattern) {
+      continue;
+    }
+
+    const severity = ["off", "warn", "error"].includes(template.severity) ? template.severity : "error";
+    if (severity === "off") {
+      continue;
+    }
+
+    for (const filePath of filesToScan) {
+      const ext = path.extname(filePath);
+      if (!CODE_EXTENSIONS.has(ext)) {
+        continue;
+      }
+
+      if (!wildcardMatch(fromPattern, filePath)) {
+        continue;
+      }
+
+      const absolutePath = path.resolve(process.cwd(), filePath);
+      if (!fs.existsSync(absolutePath)) {
+        continue;
+      }
+
+      const imports = extractImportsWithLine(fs.readFileSync(absolutePath, "utf8"));
+      for (const imported of imports) {
+        const targetPath = resolveImportTarget(filePath, imported.importPath);
+        if (!wildcardMatch(denyPattern, targetPath)) {
+          continue;
+        }
+
+        findings.push({
+          ruleId: template.id || "no_path_imports",
+          severity,
+          serviceId: detectServiceIdByFilePath(services, filePath),
+          filePath,
+          line: imported.line,
+          detail: ` imported path \`${imported.importPath}\``,
+          reason: `imports from \`${filePath}\` match deny pattern \`${denyPattern}\`.`,
+          fix: `update boundaries or change template \`${template.id || "no_path_imports"}\` patterns.`
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+function resolveImportTarget(sourceFilePath, importPath) {
+  const normalizedImport = normalizePath(importPath);
+  if (!normalizedImport.startsWith(".")) {
+    return normalizedImport;
+  }
+
+  const sourceDir = path.dirname(path.resolve(process.cwd(), sourceFilePath));
+  const absoluteTarget = path.resolve(sourceDir, normalizedImport);
+  const resolved = resolveCodePath(absoluteTarget);
+  return normalizePath(path.relative(process.cwd(), resolved));
+}
+
+function resolveCodePath(absoluteBasePath) {
+  const candidates = [absoluteBasePath];
+  for (const ext of CODE_EXTENSIONS) {
+    candidates.push(`${absoluteBasePath}${ext}`);
+  }
+
+  for (const ext of CODE_EXTENSIONS) {
+    candidates.push(path.join(absoluteBasePath, `index${ext}`));
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+
+  return absoluteBasePath;
+}
+
+function wildcardMatch(pattern, value) {
+  const regex = wildcardToRegExp(pattern);
+  return regex.test(value);
+}
+
+function wildcardToRegExp(pattern) {
+  const escaped = normalizePath(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "::DOUBLE_STAR::")
+    .replace(/\*/g, "[^/]*")
+    .replace(/::DOUBLE_STAR::/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function detectServiceIdByFilePath(services, filePath) {
+  for (const service of services) {
+    const servicePath = normalizePath(service.path || "");
+    if (servicePath && isInsidePath(filePath, servicePath)) {
+      return service.id || "unknown";
+    }
+  }
+  return "unknown";
+}
+
+function getEnabledRuleTemplateIds(config) {
+  const templates = Array.isArray(config.rule_templates) ? config.rule_templates : [];
+  const ids = [];
+
+  for (const template of templates) {
+    if (!template || typeof template !== "object") {
+      continue;
+    }
+
+    if (template.enabled === false) {
+      continue;
+    }
+
+    const templateId = typeof template.id === "string" ? template.id.trim() : "";
+    if (!templateId) {
+      continue;
+    }
+
+    ids.push(templateId);
+  }
+
+  return ids;
 }
 
 function discoverServices(roots, inferenceMode) {
@@ -704,6 +854,99 @@ function validateDetectors(config, configDisplayPath, diagnostics) {
   }
 }
 
+function validateRuleTemplates(config, configDisplayPath, diagnostics) {
+  if (config.rule_templates === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(config.rule_templates)) {
+    diagnostics.push({
+      level: "error",
+      code: "rule_templates_invalid_shape",
+      location: configDisplayPath,
+      message: "`rule_templates` must be an array.",
+      fix: "set `rule_templates` as a list of template objects."
+    });
+    return;
+  }
+
+  const seenTemplateIds = new Set();
+
+  for (const template of config.rule_templates) {
+    if (!template || typeof template !== "object" || Array.isArray(template)) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_invalid_item",
+        location: configDisplayPath,
+        message: "`rule_templates` contains an invalid entry.",
+        fix: "each template must be an object."
+      });
+      continue;
+    }
+
+    if (template.type !== "no_path_imports") {
+      diagnostics.push({
+        level: "warn",
+        code: "rule_template_unknown_type",
+        location: configDisplayPath,
+        message: `Unknown template type: ${String(template.type)}.`,
+        fix: "use `type: no_path_imports` for now."
+      });
+      continue;
+    }
+
+    if (typeof template.id !== "string" || !template.id.trim()) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_missing_id",
+        location: configDisplayPath,
+        message: "Template missing `id`.",
+        fix: "set a unique template `id`."
+      });
+    } else if (seenTemplateIds.has(template.id.trim())) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_duplicate_id",
+        location: configDisplayPath,
+        message: `Duplicate template id: ${template.id.trim()}.`,
+        fix: "use unique ids across `rule_templates`."
+      });
+    } else {
+      seenTemplateIds.add(template.id.trim());
+    }
+
+    if (typeof template.from !== "string" || !template.from.trim()) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_missing_from",
+        location: configDisplayPath,
+        message: `Template ${String(template.id || "<unknown>")} is missing \`from\`.`,
+        fix: "set a wildcard path pattern in `from`."
+      });
+    }
+
+    if (typeof template.deny_import !== "string" || !template.deny_import.trim()) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_missing_deny_import",
+        location: configDisplayPath,
+        message: `Template ${String(template.id || "<unknown>")} is missing \`deny_import\`.`,
+        fix: "set a wildcard path pattern in `deny_import`."
+      });
+    }
+
+    if (template.severity !== undefined && !["off", "warn", "error"].includes(template.severity)) {
+      diagnostics.push({
+        level: "error",
+        code: "rule_template_invalid_severity",
+        location: configDisplayPath,
+        message: `Template ${String(template.id || "<unknown>")} has invalid severity: ${String(template.severity)}.`,
+        fix: "use one of: off, warn, error."
+      });
+    }
+  }
+}
+
 function validateServices(config, configDisplayPath, diagnostics) {
   if (!Array.isArray(config.services)) {
     return;
@@ -863,7 +1106,15 @@ function renderDoctorReport({ diagnostics, configDisplayPath }) {
   return lines.join("\n");
 }
 
-function renderReport({ findings, changedOnly, changedFilesConsidered, codeFilesScanned, modelFilesChecked, dbClientPackagesCount }) {
+function renderReport({
+  findings,
+  changedOnly,
+  changedFilesConsidered,
+  codeFilesScanned,
+  modelFilesChecked,
+  dbClientPackagesCount,
+  enabledTemplateIds
+}) {
   const lines = [];
   lines.push("## Archguard Report");
   lines.push("");
@@ -872,7 +1123,10 @@ function renderReport({ findings, changedOnly, changedFilesConsidered, codeFiles
   lines.push(`- Code files scanned: ${codeFilesScanned}`);
   lines.push(`- Model files checked: ${modelFilesChecked.join(", ")}`);
   lines.push(`- DB client detector packages: ${dbClientPackagesCount}`);
-  lines.push(`- Rules: ${SUPPORTED_RULES.join(", ")}`);
+  lines.push(`- Built-in rules: ${SUPPORTED_RULES.join(", ")}`);
+  lines.push(
+    `- Rule templates: ${enabledTemplateIds.length > 0 ? enabledTemplateIds.join(", ") : "none"}`
+  );
   lines.push(`- Violations: ${findings.length}`);
   lines.push("");
 
@@ -888,7 +1142,7 @@ function renderReport({ findings, changedOnly, changedFilesConsidered, codeFiles
 
   for (const finding of findings) {
     const location = finding.line ? `${finding.filePath}:${finding.line}` : finding.filePath;
-    const detail = finding.importedPackage ? ` imported DB client \`${finding.importedPackage}\`` : "";
+    const detail = finding.detail || (finding.importedPackage ? ` imported DB client \`${finding.importedPackage}\`` : "");
     lines.push(
       `- **${finding.severity.toUpperCase()}** ${finding.ruleId}: service \`${finding.serviceId}\`${detail} in \`${location}\`.`
     );
