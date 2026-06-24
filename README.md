@@ -89,6 +89,20 @@ Share first-install feedback in:
 
 - `New issue -> Try Archguard (First install feedback)`
 
+## Baseline mode (legacy-friendly rollout)
+
+Create a baseline from current findings:
+
+```bash
+npx @nahuelorselli/archguard baseline create --out .archguard-baseline.json
+```
+
+Then fail only on newly introduced violations:
+
+```bash
+npx @nahuelorselli/archguard check --baseline .archguard-baseline.json
+```
+
 ## Install and run
 
 No global install required:

@@ -54,6 +54,12 @@ Success signal:
 
 ## Milestone 3: Team workflow fit
 
+Status: `in_progress`
+
+Progress update:
+
+- [x] Baseline mode (fail only on new violations)
+
 What users get:
 
 - Baseline mode (fail only on new violations)
