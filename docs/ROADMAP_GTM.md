@@ -38,7 +38,8 @@ What changes based on user feedback:
 
 - [x] Customizable detector inputs from config (DB client packages)
 - [ ] Extended detector inputs from config (import patterns)
-- Rule templates so teams can add guardrails without modifying Archguard source
+- [x] First rule template (`no_path_imports`) for config-driven guardrails
+- [ ] Additional rule templates for broader policy coverage
 
 What users get:
 

@@ -49,6 +49,17 @@ detectors:
     - typeorm
 ```
 
+Add custom path-boundary guardrails without changing Archguard code:
+
+```yaml
+rule_templates:
+  - id: no-web-imports-from-api
+    type: no_path_imports
+    from: apps/web/**
+    deny_import: apps/api/**
+    severity: error
+```
+
 ## Fast onboarding
 
 Create a starter `.archguard.yaml` from your repo layout:
