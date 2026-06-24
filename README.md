@@ -5,6 +5,7 @@ Minimal Architecture-as-Code tool focused on deterministic PR guardrails in GitH
 See `ROADMAP.md` for planned milestones and priorities.
 See `docs/ROADMAP_GTM.md` for user-facing rollout plan.
 See `docs/ADOPTION_CHECKLIST.md` for first 10 installs tracking.
+See `docs/CI_BASELINE_ROLLOUT.md` for Day 0 -> Day 1 rollout.
 
 ## 30-second quickstart
 
@@ -102,6 +103,8 @@ Then fail only on newly introduced violations:
 ```bash
 npx @nahuelorselli/archguard check --baseline .archguard-baseline.json
 ```
+
+For a staged adoption plan, follow `docs/CI_BASELINE_ROLLOUT.md`.
 
 ## Install and run
 
