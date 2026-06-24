@@ -787,6 +787,20 @@ function renderReport({
     return lines.join("\n");
   }
 
+  lines.push("### Summary by service");
+  lines.push("");
+  for (const [serviceId, count] of Object.entries(groupFindingsByService(findings))) {
+    lines.push(`- ${serviceId}: ${count}`);
+  }
+  lines.push("");
+
+  lines.push("### Summary by rule");
+  lines.push("");
+  for (const [ruleId, count] of Object.entries(groupFindingsByRule(findings))) {
+    lines.push(`- ${ruleId}: ${count}`);
+  }
+  lines.push("");
+
   lines.push("### Violations");
   lines.push("");
 
@@ -801,6 +815,24 @@ function renderReport({
   }
 
   return lines.join("\n");
+}
+
+function groupFindingsByService(findings) {
+  const counts = {};
+  for (const finding of findings) {
+    const key = finding.serviceId || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
+function groupFindingsByRule(findings) {
+  const counts = {};
+  for (const finding of findings) {
+    const key = finding.ruleId || "unknown";
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
 }
 
 module.exports = {

@@ -58,6 +58,21 @@ test("validateRuleTemplates reports missing fields", () => {
   assert.equal(codes.includes("rule_template_missing_deny_import"), true);
 });
 
+test("validateRuleTemplates validates allowed_service_dependencies fields", () => {
+  const diagnostics = [];
+  validateRuleTemplates(
+    {
+      rule_templates: [{ id: "allow-web", type: "allowed_service_dependencies" }]
+    },
+    ".archguard.yaml",
+    diagnostics
+  );
+
+  const codes = diagnostics.map((entry) => entry.code);
+  assert.equal(codes.includes("rule_template_missing_service"), true);
+  assert.equal(codes.includes("rule_template_missing_allow"), true);
+});
+
 test("evaluateRuleTemplates detects no_path_imports violations", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "archguard-templates-"));
   const webDir = path.join(tempRoot, "apps", "web", "src");
@@ -104,6 +119,58 @@ test("evaluateRuleTemplates detects no_path_imports violations", () => {
 
     assert.equal(findings.length, 1);
     assert.equal(findings[0].ruleId, "no-web-imports-from-api");
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("evaluateRuleTemplates enforces allowed_service_dependencies", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "archguard-templates-"));
+  const webDir = path.join(tempRoot, "apps", "web", "src");
+  const apiDir = path.join(tempRoot, "apps", "api", "src");
+  fs.mkdirSync(webDir, { recursive: true });
+  fs.mkdirSync(apiDir, { recursive: true });
+
+  const webFile = path.join(webDir, "index.ts");
+  const apiFile = path.join(apiDir, "users.ts");
+  fs.writeFileSync(webFile, 'import { users } from "../../api/src/users";\n', "utf8");
+  fs.writeFileSync(apiFile, 'export const users = [];\n', "utf8");
+
+  const previousCwd = process.cwd();
+  process.chdir(tempRoot);
+
+  try {
+    const findings = evaluateRuleTemplates(
+      {
+        rule_templates: [
+          {
+            id: "web-allowed-deps",
+            type: "allowed_service_dependencies",
+            service: "web",
+            allow: ["apps/shared/**"],
+            severity: "error"
+          }
+        ]
+      },
+      [
+        { id: "web", path: "apps/web", type: "frontend" },
+        { id: "api", path: "apps/api", type: "backend" }
+      ],
+      ["apps/web/src/index.ts"],
+      {
+        fs,
+        path,
+        codeExtensions: CODE_EXTENSIONS,
+        cwd: tempRoot,
+        normalizePath,
+        isInsidePath,
+        extractImportsWithLine
+      }
+    );
+
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].ruleId, "web-allowed-deps");
   } finally {
     process.chdir(previousCwd);
     fs.rmSync(tempRoot, { recursive: true, force: true });

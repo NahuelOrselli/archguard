@@ -19,7 +19,7 @@ This roadmap defines the execution path to make Archguard a trusted, PR-first ar
 
 ---
 
-## v0.2 - Foundation DX (in_progress)
+## v0.2 - Foundation DX (completed)
 
 Goal: make onboarding and day-1 usage excellent.
 
@@ -35,17 +35,17 @@ Priority note: current focus is extensibility and confidence for early adopters.
   - `archguard init --preset <name> --root <path>`
 - [x] `archguard doctor` command
   - Validate config file, paths, duplicated IDs, and malformed rules
-- [ ] Config polish
+- [x] Config polish
   - Clear validation errors with actionable fix hints
   - Stable schema docs for `.archguard.yaml`
-- [ ] Better PR output readability
+- [x] Better PR output readability
   - Group violations by service and by rule
 - [x] Detector configurability (no code change required)
   - Configure DB client package list in `.archguard.yaml`
   - Keep built-in defaults as fallback
-- [ ] Rule templates (v0.2 scope)
+- [x] Rule templates (v0.2 scope)
   - [x] Add path-based boundary template (`from` + `deny_import`)
-  - [ ] Add allowed dependencies template per service
+  - [x] Add allowed dependencies template per service
 
 Exit criteria:
 

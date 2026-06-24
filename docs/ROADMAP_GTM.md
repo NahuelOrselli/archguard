@@ -32,14 +32,14 @@ Success signal:
 
 ## Milestone 2: Stronger rule packs
 
-Status: `planned` (next priority)
+Status: `in_progress`
 
 What changes based on user feedback:
 
 - [x] Customizable detector inputs from config (DB client packages)
 - [ ] Extended detector inputs from config (import patterns)
 - [x] First rule template (`no_path_imports`) for config-driven guardrails
-- [ ] Additional rule templates for broader policy coverage
+- [x] Additional rule templates for broader policy coverage (`allowed_service_dependencies`)
 
 What users get:
 
