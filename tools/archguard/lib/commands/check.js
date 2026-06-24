@@ -3,6 +3,60 @@ function runCheck(args, ctx) {
     fs,
     path,
     process,
+    renderReport,
+    splitFindingsByBaseline,
+    loadBaselineDocument,
+    buildBaselineSet
+  } = ctx;
+
+  const checkResult = collectCheckResult(args, ctx);
+  let findingsForReport = checkResult.findings;
+  let baselineInfo = null;
+
+  if (args.baseline) {
+    const baselinePath = path.resolve(process.cwd(), args.baseline);
+    if (!fs.existsSync(baselinePath)) {
+      throw new Error(`Baseline file not found: ${baselinePath}`);
+    }
+
+    const baselineDocument = loadBaselineDocument(fs, baselinePath);
+    const baselineSet = buildBaselineSet(baselineDocument);
+    const split = splitFindingsByBaseline(checkResult.findings, baselineSet);
+    findingsForReport = split.introduced;
+    baselineInfo = {
+      path: args.baseline,
+      total: checkResult.findings.length,
+      existing: split.existing.length,
+      introduced: split.introduced.length
+    };
+  }
+
+  const report = renderReport({
+    findings: findingsForReport,
+    changedOnly: checkResult.changedOnly,
+    changedFilesConsidered: checkResult.changedFilesConsidered,
+    codeFilesScanned: checkResult.codeFilesScanned,
+    modelFilesChecked: checkResult.modelFilesChecked,
+    dbClientPackagesCount: checkResult.dbClientPackagesCount,
+    enabledTemplateIds: checkResult.enabledTemplateIds,
+    baselineInfo
+  });
+
+  if (args.out) {
+    fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
+  }
+
+  process.stdout.write(report + "\n");
+
+  if (findingsForReport.some((finding) => finding.severity === "error")) {
+    process.exit(1);
+  }
+}
+
+function collectCheckResult(args, ctx) {
+  const {
+    fs,
+    path,
     CODE_EXTENSIONS,
     DEFAULT_CONFIG_NAME,
     resolveExistingConfigPath,
@@ -17,8 +71,7 @@ function runCheck(args, ctx) {
     isInsidePath,
     validateFrontendPackageJson,
     extractImportsWithLine,
-    getRuleSeverity,
-    renderReport
+    getRuleSeverity
   } = ctx;
 
   const configPath = resolveExistingConfigPath(args.config);
@@ -84,7 +137,7 @@ function runCheck(args, ctx) {
     }
   }
 
-  const report = renderReport({
+  return {
     findings,
     changedOnly: args.changedOnly,
     changedFilesConsidered: normalizedSourceFiles.length,
@@ -92,19 +145,10 @@ function runCheck(args, ctx) {
     modelFilesChecked: [configDisplayPath],
     dbClientPackagesCount: dbClientPackages.size,
     enabledTemplateIds
-  });
-
-  if (args.out) {
-    fs.writeFileSync(path.resolve(process.cwd(), args.out), report, "utf8");
-  }
-
-  process.stdout.write(report + "\n");
-
-  if (findings.some((finding) => finding.severity === "error")) {
-    process.exit(1);
-  }
+  };
 }
 
 module.exports = {
-  runCheck
+  runCheck,
+  collectCheckResult
 };

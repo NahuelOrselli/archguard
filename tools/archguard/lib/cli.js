@@ -8,6 +8,7 @@ const yaml = require("js-yaml");
 const { runCheck } = require("./commands/check");
 const { runDoctor } = require("./commands/doctor");
 const { runInit } = require("./commands/init");
+const { runBaseline } = require("./commands/baseline");
 const {
   resolveDbClientPackages,
   validateDetectors
@@ -17,6 +18,12 @@ const {
   getEnabledRuleTemplateIds,
   validateRuleTemplates
 } = require("./rules/templates");
+const {
+  createBaselineDocument,
+  loadBaselineDocument,
+  buildBaselineSet,
+  splitFindingsByBaseline
+} = require("./baseline");
 
 const CODE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 const SUPPORTED_RULES = ["no_frontend_db_access", "require_owner"];
@@ -35,6 +42,11 @@ async function main() {
 
   if (args.command === "doctor") {
     runDoctor(args, commandContext);
+    return;
+  }
+
+  if (args.command === "baseline") {
+    runBaseline(args, commandContext);
     return;
   }
 
@@ -84,6 +96,10 @@ function createCommandContext() {
     validateServices,
     validateRules,
     renderDoctorReport,
+    createBaselineDocument,
+    loadBaselineDocument,
+    buildBaselineSet,
+    splitFindingsByBaseline,
     resolveInitOptions,
     discoverServices,
     getRulesPreset
@@ -98,13 +114,21 @@ function parseArgs(argv) {
     base: null,
     head: null,
     out: null,
+    baseline: null,
     force: false,
     yes: false,
     preset: null,
-    root: null
+    root: null,
+    subcommand: null
   };
 
-  for (let i = 1; i < argv.length; i += 1) {
+  let startIndex = 1;
+  if (args.command === "baseline") {
+    args.subcommand = argv[1] || null;
+    startIndex = 2;
+  }
+
+  for (let i = startIndex; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === "--config") {
       args.config = argv[i + 1];
@@ -119,6 +143,9 @@ function parseArgs(argv) {
       i += 1;
     } else if (token === "--out") {
       args.out = argv[i + 1];
+      i += 1;
+    } else if (token === "--baseline") {
+      args.baseline = argv[i + 1];
       i += 1;
     } else if (token === "--force") {
       args.force = true;
@@ -140,15 +167,27 @@ function parseArgs(argv) {
     }
   }
 
+  if (args.command === "baseline") {
+    if (!args.subcommand) {
+      process.stderr.write("Missing baseline subcommand. Use: baseline create\n");
+      process.exit(1);
+    }
+    if (!["create"].includes(args.subcommand)) {
+      process.stderr.write("Invalid baseline subcommand. Use: baseline create\n");
+      process.exit(1);
+    }
+  }
+
   return args;
 }
 
 function printUsageAndExit(code) {
   process.stderr.write(
-    "Usage:\n" +
-      "  archguard check [--config .archguard.yaml] [--changed-only --base <sha> --head <sha>] [--out <file>]\n" +
+      "Usage:\n" +
+      "  archguard check [--config .archguard.yaml] [--changed-only --base <sha> --head <sha>] [--baseline <file>] [--out <file>]\n" +
       "  archguard init [--config .archguard.yaml] [--force] [--yes] [--preset <minimal|recommended|strict>] [--root <path1,path2>]\n" +
-      "  archguard doctor [--config .archguard.yaml] [--out <file>]\n"
+      "  archguard doctor [--config .archguard.yaml] [--out <file>]\n" +
+      "  archguard baseline create [--config .archguard.yaml] [--out .archguard-baseline.json]\n"
   );
   process.exit(code);
 }
@@ -717,7 +756,8 @@ function renderReport({
   codeFilesScanned,
   modelFilesChecked,
   dbClientPackagesCount,
-  enabledTemplateIds
+  enabledTemplateIds,
+  baselineInfo
 }) {
   const lines = [];
   lines.push("## Archguard Report");
@@ -731,6 +771,12 @@ function renderReport({
   lines.push(
     `- Rule templates: ${enabledTemplateIds.length > 0 ? enabledTemplateIds.join(", ") : "none"}`
   );
+  if (baselineInfo) {
+    lines.push(`- Baseline: ${baselineInfo.path}`);
+    lines.push(
+      `- Baseline filtering: ${baselineInfo.existing} existing ignored, ${baselineInfo.introduced} introduced`
+    );
+  }
   lines.push(`- Violations: ${findings.length}`);
   lines.push("");
 

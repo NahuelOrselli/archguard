@@ -88,7 +88,7 @@ Goal: make Archguard usable across team workflows and CI setups.
 - [ ] Machine-readable outputs
   - Stable JSON output
   - Optional SARIF output
-- [ ] Baseline mode
+- [x] Baseline mode
   - Fail on new violations only
 - [ ] PR comments with architecture-change summaries
 

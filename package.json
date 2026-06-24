@@ -39,6 +39,7 @@
     "archguard:changed": "node tools/archguard/index.js check --changed-only",
     "archguard:init": "node tools/archguard/index.js init",
     "archguard:doctor": "node tools/archguard/index.js doctor",
+    "archguard:baseline": "node tools/archguard/index.js baseline create --out .archguard-baseline.json",
     "test": "node --test tests/**/*.test.js"
   },
   "dependencies": {
